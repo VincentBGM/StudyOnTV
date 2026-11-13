@@ -2,11 +2,20 @@ package com.studyontv.tv
 
 import android.accessibilityservice.AccessibilityService
 import android.content.Context
+import android.view.KeyEvent
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 
 class WatchAccessibilityService : AccessibilityService() {
     private var gate: GateOverlay? = null
+    private val homeKeys = HomeKeyFilter { LearningNavigation.shouldBlockHome() }
+
+    public override fun onKeyEvent(event: KeyEvent): Boolean {
+        val consumed = homeKeys.handle(event)
+        if (consumed && event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0)
+            blockedHomePresses++
+        return consumed
+    }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
@@ -30,6 +39,7 @@ class WatchAccessibilityService : AccessibilityService() {
      * 留下一条记录，#120 这类「无障碍自己关闭」才能分清是解绑还是进程被杀（进程被杀不会走到任何回调）。
      */
     override fun onUnbind(intent: android.content.Intent?): Boolean {
+        homeKeys.reset()
         Diag.warn("A11y", "service unbound action=${intent?.action}")
         return super.onUnbind(intent)
     }
@@ -43,6 +53,7 @@ class WatchAccessibilityService : AccessibilityService() {
         GateService.ensureRunning(this, "accessibility")
     }
     override fun onDestroy() {
+        homeKeys.reset()
         Diag.info("A11y", "service destroyed connected=$connected")
         gate?.destroy(); gate = null
         instance = null
@@ -52,6 +63,8 @@ class WatchAccessibilityService : AccessibilityService() {
     }
 
     companion object {
+        @Volatile var blockedHomePresses = 0L
+            private set
         private var instance: WatchAccessibilityService? = null
         var connected = false
             private set
@@ -61,6 +74,9 @@ class WatchAccessibilityService : AccessibilityService() {
                 .any { it.resolveInfo.serviceInfo.packageName == context.packageName }
         } catch (_: Exception) { false }
         fun hasGate(): Boolean = instance?.gate?.isShowing == true
+        fun presentedGate(): Boolean = instance?.gate?.presenting() == true
+        fun keyFilterRequested(): Boolean = connected && ((instance?.serviceInfo?.flags ?: 0) and
+            android.accessibilityservice.AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS) != 0
         fun showGate(reason: String): Boolean = instance?.gate?.show(reason) == true
         fun hideGate() { instance?.gate?.hide() }
         fun suspendGate() { instance?.gate?.suspend() }

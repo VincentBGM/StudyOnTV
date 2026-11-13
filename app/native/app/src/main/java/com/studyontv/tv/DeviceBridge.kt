@@ -101,7 +101,7 @@ open class DeviceBridge(protected val activity: Activity, private val connection
     @JavascriptInterface
     fun exitToLauncher() {
         val status = DeviceRuntime.learning.status()
-        if (status.getString("reason").isNotEmpty() || (status.optLong("remainingSeconds") <= 0 && !status.optBoolean("free"))) return
+        if (!status.optBoolean("canExit")) return
         activity.runOnUiThread {
             GateService.hideGates()
             // 答题结束回到「上一个任务」，绝不能主动跳桌面，否则正在播放的视频会被顶掉（#54 / #63）。

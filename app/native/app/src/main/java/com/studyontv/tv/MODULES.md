@@ -10,6 +10,7 @@
 | `GateTickState.kt` | 单次 tick 的事实快照（纯数据），弹窗 / 静音 / 角标读同一份判断 |
 | `GateOverlay.kt` / `CountdownOverlay.kt` / `GateActivity.kt` | 悬浮窗管控层、右上角剩余时间角标、全屏学习页 |
 | `LearningEngine.kt` | 答题业务：出题、计时、奖励、错题与覆盖优先 |
+| `LearningNavigation.kt` | 学习退出策略快照、遥控器导航按键过滤与不可用提示 |
 | `TimePolicy.kt` / `DeviceClock.kt` | 可用时段判断、「今天」的界线（支持家长指定时区） |
 | `WatchGap.kt` | 进程被固件清理期间漏掉的观看时长补算（心跳 + 开机时钟，不含深睡） |
 | `WatchWhitelist.kt` | 不计时应用白名单（屏保 / 网课）的校验与解析 |
