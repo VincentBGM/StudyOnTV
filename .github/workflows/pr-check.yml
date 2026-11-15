@@ -19,12 +19,27 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: parent-ui/package-lock.json
+
       - name: 设置 Gradle 缓存
         uses: gradle/actions/setup-gradle@v3
 
-      - name: 编译 TV Debug（无需签名）
+      - name: 安装 parent-ui 依赖
+        working-directory: parent-ui
+        run: npm ci
+
+      - name: 构建 parent-ui（生成 admin/，Android 编译依赖它）
+        working-directory: parent-ui
+        run: npm run build
+
+      - name: 编译 TV + Mobile Debug APK（无需签名）
         working-directory: app/native
-        run: ./gradlew assembleTvDebug assembleMobileDebug
+        run: ./gradlew assembleTvDebug assembleMobileDebug --no-daemon
 
   ui-check:
     name: 前端类型检查
