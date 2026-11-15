@@ -191,8 +191,25 @@ object SpeechReader {
         JSONObject().put("ok", false).put("mode", mode).put("requested", requested).put("language", language)
             .put("degraded", degraded).put("reason", reason).put("message", message).put("at", System.currentTimeMillis())
 
-    /** 设备默认语言（TTS 语言缺失时的回落目标） */
-    fun defaultLanguage(): String = Locale.getDefault().toLanguageTag().takeIf { it.isNotBlank() } ?: "zh-CN"
+    /**
+     * BCP47 标签标准化：`zh-Hans-CN` / `zh-Hant-TW` 这类带文字扩展的标签，部分 TTS 引擎的
+     * `setLanguage` 会直接返回 LANG_MISSING_DATA，表现就是「明明装了中文语音包却读不出来」(#128)。
+     */
+    fun normalizeLanguageTag(raw: String): String {
+        val tag = raw.trim()
+        return when {
+            tag.isEmpty() -> "zh-CN"
+            tag.startsWith("zh-Hans") || tag == "zh" || tag == "zh-CN" -> "zh-CN"
+            tag.startsWith("zh-Hant-TW") || tag == "zh-TW" -> "zh-TW"
+            tag.startsWith("zh-Hant-HK") || tag == "zh-HK" || tag.startsWith("zh-Hant-MO") -> "zh-HK"
+            tag.startsWith("en-US") || tag == "en" -> "en-US"
+            tag.startsWith("en-GB") || tag.startsWith("en-") -> "en-GB"
+            else -> tag
+        }
+    }
+
+    /** 设备默认语言（TTS 语言缺失时的回落目标），已做 BCP47 标准化 */
+    fun defaultLanguage(): String = normalizeLanguageTag(Locale.getDefault().toLanguageTag())
 
     /** 语言回落结果：degraded=true 表示请求的语言用不了，已经换成别的（或彻底失败，accepted=false） */
     data class LanguagePlan(val requested: String, val language: String, val accepted: Boolean, val degraded: Boolean, val reason: String)

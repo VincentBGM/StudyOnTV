@@ -103,6 +103,10 @@ export async function previewApi(path:string,method:string,body:any){
   return structuredClone({sources:bankSources});
  }
  if(route==='/api/banks/fetch')return{ok:true,data:structuredClone(previewFetchedBank)};
+ if(route==='/api/speech/probe')return{ok:true,engine:'com.google.android.tts',language:'zh-CN',langStatus:0,hint:'本地语音可用（com.google.android.tts）'};
+ if(route==='/api/speech/engines')return{defaultEngine:'com.google.android.tts',engines:[{name:'com.google.android.tts',label:'Google 文字转语音',default:true},{name:'com.example.voice',label:'讯飞语音',default:false}]};
+ if(route==='/api/speech/install-voice')return{ok:true};
+ if(route==='/api/speech/test')return{ok:true,mode:'system',reason:'ok',language:'zh-CN'};
  if(route==='/api/speech'){if(method==='PUT'){speech={...speech,...body,azureKeySet:body.clearKeys?false:!!body.azureKey||speech.azureKeySet,aliyunSecretSet:body.clearKeys?false:!!body.aliyunSecret||speech.aliyunSecretSet};delete speech.azureKey;delete speech.aliyunSecret;}return structuredClone(speech);}
  if(route==='/api/bank-automation'){if(method==='PUT')automation={...automation,...body};return structuredClone(automation);}
  if(route==='/api/bank-automation/sync'){automation.status={at:Date.now(),ok:true,sources:[]};return structuredClone(automation);}

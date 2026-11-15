@@ -308,6 +308,25 @@ class LanServer(
         }
         router.get("/api/speech") { ctx -> json(ctx.out, 200, SpeechReader.settings(store)) }
         router.put("/api/speech") { ctx -> json(ctx.out, 200, SpeechReader.save(store, JSONObject(ctx.body))) }
+        // #128 本地语音诊断：引擎列表只查 PackageManager；探测会阻塞最多 3 秒（路由本来就跑在 worker 线程）
+        router.get("/api/speech/engines") { ctx ->
+            json(ctx.out, 200, JSONObject().put("engines", TtsProbe.installedEngines(context))
+                .put("defaultEngine", TtsProbe.defaultEngine()))
+        }
+        router.get("/api/speech/probe") { ctx ->
+            json(ctx.out, 200, TtsProbe.probe(context, ctx.query["language"].orEmpty().ifBlank { "zh-CN" }))
+        }
+        router.post("/api/speech/install-voice") { ctx ->
+            json(ctx.out, 200, JSONObject().put("ok", TtsProbe.openInstallVoiceData(context)))
+        }
+        // 面板「测试朗读」：在电视上读一句，短暂等一下首个结果再回报，避免面板只看到 idle
+        router.post("/api/speech/test") { ctx ->
+            val text = try { JSONObject(ctx.body.ifEmpty { "{}" }).optString("text").trim() } catch (_: Exception) { "" }
+            SpeechReader.read(context, text.ifBlank { "今天天气不错" }.take(200))
+            val started = System.currentTimeMillis()
+            while (System.currentTimeMillis() - started < 800 && SpeechReader.status().optString("reason") == "idle") Thread.sleep(50)
+            json(ctx.out, 200, SpeechReader.status())
+        }
         router.get("/api/bank-automation") { ctx -> json(ctx.out, 200, BankAutomation.settings(store)) }
         router.put("/api/bank-automation") { ctx -> json(ctx.out, 200, BankAutomation.save(store, JSONObject(ctx.body))) }
         // 题库市场：读共享题库的索引，家长点一下就加进本机题库
