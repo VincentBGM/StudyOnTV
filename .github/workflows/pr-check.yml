@@ -28,6 +28,8 @@ jobs:
 
       - name: 设置 Gradle 缓存
         uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.14.3'
 
       - name: 安装 parent-ui 依赖
         working-directory: parent-ui
@@ -39,7 +41,7 @@ jobs:
 
       - name: 编译 TV + Mobile Debug APK（无需签名）
         working-directory: app/native
-        run: ./gradlew assembleTvDebug assembleMobileDebug --no-daemon
+        run: gradle assembleTvDebug assembleMobileDebug --no-daemon
 
   ui-check:
     name: 前端类型检查

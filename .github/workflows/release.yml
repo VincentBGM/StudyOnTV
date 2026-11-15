@@ -34,6 +34,8 @@ jobs:
 
       - name: 设置 Gradle 缓存
         uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.14.3'   # 与项目 gradle-wrapper 版本一致，无需 gradlew 文件
 
       # ── 1. 构建家长面板 → 输出到 admin/ ──────────────────────────────
       - name: 安装 parent-ui 依赖
@@ -63,11 +65,11 @@ jobs:
       # ── 3. 构建 Android APK ───────────────────────────────────────────
       - name: 构建 TV Release APK
         working-directory: app/native
-        run: ./gradlew assembleTvRelease --no-daemon
+        run: gradle assembleTvRelease --no-daemon
 
       - name: 构建 Mobile Release APK
         working-directory: app/native
-        run: ./gradlew assembleMobileRelease --no-daemon
+        run: gradle assembleMobileRelease --no-daemon
 
       # ── 4. 整理产物，重命名为发布文件名 ─────────────────────────────
       - name: 整理产物
