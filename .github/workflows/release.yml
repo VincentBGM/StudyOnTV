@@ -107,3 +107,24 @@ jobs:
         with:
           files: release-artifacts/*.apk
           fail_on_unmatched_files: true
+
+      # ── 8. 上传到蒲公英（备用下载）────────────────────────────────────
+      - name: 上传 Mobile APK 到蒲公英
+        if: ${{ secrets.PGYER_API_KEY != '' }}
+        run: |
+          curl -s --fail-with-body \
+            -F "apiKey=${{ secrets.PGYER_API_KEY }}" \
+            -F "file=@release-artifacts/StudyOnTV-Mobile-${TAG}.apk" \
+            -F "buildUpdateDescription=$(git tag -l --format='%(contents:body)' "$TAG" 2>/dev/null || echo "")" \
+            "https://www.pgyer.com/apiv2/app/upload" | tee pgyer-mobile.json
+          cat pgyer-mobile.json | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if d.get('code')==0 else 1)"
+
+      - name: 上传 TV APK 到蒲公英
+        if: ${{ secrets.PGYER_API_KEY != '' }}
+        run: |
+          curl -s --fail-with-body \
+            -F "apiKey=${{ secrets.PGYER_API_KEY }}" \
+            -F "file=@release-artifacts/StudyOnTV-Android-TV-${TAG}.apk" \
+            -F "buildUpdateDescription=$(git tag -l --format='%(contents:body)' "$TAG" 2>/dev/null || echo "")" \
+            "https://www.pgyer.com/apiv2/app/upload" | tee pgyer-tv.json
+          cat pgyer-tv.json | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if d.get('code')==0 else 1)"
