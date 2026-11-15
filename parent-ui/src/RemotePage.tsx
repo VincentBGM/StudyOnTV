@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowUpRight,
   BookOpen,
+  ChevronDown,
   ChevronRight,
   ClipboardCheck,
   Clock3,
@@ -35,6 +36,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -140,6 +142,8 @@ export default function RemotePage({ state, sessionId }: { state: any; sessionId
               : '管控中 · 可以使用';
 
   const [adjustSign, setAdjustSign] = useState(1);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [showChart, setShowChart] = useState(false);
   const [custom, setCustom] = useState<{
     mode: 'unlock' | 'lock' | 'indefinite' | 'credit';
     minutes: string;
@@ -213,19 +217,37 @@ export default function RemotePage({ state, sessionId }: { state: any; sessionId
             调整剩余时间
           </Button>
           {!mode && (
-            <Button
-              variant="destructive"
-              size="sm"
-              disabled={run.isPending}
-              onClick={() => {
-                if (window.confirm('关闭管控后孩子可无限使用，直到您手动恢复，确定吗？')) {
-                  go('indefinite', 0, '管控已关闭');
-                }
-              }}
-            >
-              <LockKeyholeOpen />
-              关闭管控
-            </Button>
+            <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+              <DialogTrigger asChild>
+                <Button variant="destructive" size="sm" disabled={run.isPending}>
+                  <LockKeyholeOpen />
+                  关闭管控
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>确认关闭管控？</DialogTitle>
+                  <DialogDescription>
+                    关闭后孩子可以无限使用，直到您手动恢复学习规则。
+                  </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setConfirmOpen(false)}>
+                    取消
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    disabled={run.isPending}
+                    onClick={() => {
+                      go('indefinite', 0, '管控已关闭');
+                      setConfirmOpen(false);
+                    }}
+                  >
+                    确认关闭
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           )}
           {mode === 'indefinite' && (
             <Button
@@ -240,8 +262,8 @@ export default function RemotePage({ state, sessionId }: { state: any; sessionId
         </div>
       </Toolbar>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-12">
-        <Card className="h-full gap-4 rounded-md border-sky-200/70 bg-sky-50/55 shadow-sm md:col-span-2 xl:col-span-6 dark:border-sky-400/15 dark:bg-sky-400/[0.055]">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <Card className="h-full gap-4 rounded-md border-sky-200/70 bg-sky-50/55 shadow-sm sm:col-span-2 xl:col-span-1 dark:border-sky-400/15 dark:bg-sky-400/[0.055]">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-sm">
               <Clock3 className="size-4 text-sky-600 dark:text-sky-400" />
@@ -296,7 +318,7 @@ export default function RemotePage({ state, sessionId }: { state: any; sessionId
           </CardFooter>
         </Card>
 
-        <Card className="h-full gap-4 rounded-md shadow-sm xl:col-span-3">
+        <Card className="h-full gap-4 rounded-md shadow-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-sm">
               <span className="flex size-5 items-center justify-center text-muted-foreground">
@@ -325,7 +347,7 @@ export default function RemotePage({ state, sessionId }: { state: any; sessionId
           </CardContent>
         </Card>
 
-        <Card className="h-full gap-4 rounded-md shadow-sm xl:col-span-3">
+        <Card className="h-full gap-4 rounded-md shadow-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-sm">
               <span className="flex size-5 items-center justify-center text-muted-foreground">
@@ -444,10 +466,21 @@ export default function RemotePage({ state, sessionId }: { state: any; sessionId
         <Card className="shadow-sm lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-sm">使用时间</CardTitle>
-            <CardAction className="text-xs text-muted-foreground">最近 7 天</CardAction>
+            <CardAction>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-expanded={showChart}
+                onClick={() => setShowChart(v => !v)}
+              >
+                <ChevronDown className={`transition-transform ${showChart ? 'rotate-180' : ''}`} />
+                {showChart ? '收起' : '查看 7 天记录'}
+              </Button>
+            </CardAction>
           </CardHeader>
-          <CardContent>
-            <div className="h-64 min-w-0">
+          {showChart && (
+            <CardContent>
+              <div className="h-64 min-w-0">
               {days.length ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={days.slice().reverse()} margin={{ top: 12, right: 8, bottom: 0, left: -15 }}>
@@ -479,8 +512,9 @@ export default function RemotePage({ state, sessionId }: { state: any; sessionId
               ) : (
                 <FieldDescription className="py-16 text-center">暂无使用记录</FieldDescription>
               )}
-            </div>
-          </CardContent>
+              </div>
+            </CardContent>
+          )}
         </Card>
 
         <Card className="shadow-sm">

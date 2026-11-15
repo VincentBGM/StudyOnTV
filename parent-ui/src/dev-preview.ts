@@ -7,7 +7,8 @@ let learning:any={usedMinutes:18,remainingSeconds:720,roundsDoneToday:1,extraPoo
 let questions:any[]=math.items.slice(0,12).map((q,i)=>({...q,id:'preview-'+i,type:'single',subject:'数学',level:'二年级',difficulty:1,enabled:true,a:q.a.map(String),
  // #136 错题库：每 4 题里有 1 道是答错的，另有一道答对、一道没作答过，方便预览筛选
  stats:{presented:i%3+1,answered:i%3,correct:i%3===0?0:Math.max(0,i%3-1),lastCorrect:i%4===0?false:i%4===1?true:null}}));
-let device:any={name:'客厅电视 · 开发预览',flavor:'tv',version:'0.3.10',ip:'127.0.0.1',port:5173,buglyConsent:false,
+let device:any={name:'客厅电视 · 开发预览',flavor:'tv',version:'0.3.10',ip:'127.0.0.1',port:5173,
+ crashUpload:{consent:false,endpoint:'',hasToken:false,pending:false},
  desktop:{supported:true,enabled:false,isDefault:false,homePackage:'com.android.tv.settings',homeLabel:'系统桌面'},
  monitor:{service:true,overlay:true,usage:true,accessibility:true,accessibilityEnabled:true,notificationListener:true,notificationListenerConnected:true,gate:false,lastTickSeconds:1,lastError:''},
  autostart:{known:true,ok:true,pending:false,via:'boot',startedAfterSeconds:12,bootBroadcast:true,uptimeMinutes:320,accessibility:true},
@@ -62,7 +63,32 @@ export async function previewApi(path:string,method:string,body:any){
  if(route==='/api/config'){if(method==='PUT')config={...config,...body,version:config.version+1};return structuredClone({config});}
  if(route==='/api/questions'){
   if(method==='POST'){const items=body.items||[body];let added=0;for(const item of items){const index=questions.findIndex(q=>q.id===item.id);if(index>=0){questions[index]={...item};added++;continue;}if(body.skipDuplicates&&questions.some(q=>stemKey(q.q)===stemKey(item.q)))continue;questions.push({...item,id:'preview-'+crypto.randomUUID()});added++;}return{ok:true,added,skipped:items.length-added};}
-  return structuredClone({items:questions,total:questions.length});
+  // 真机上是服务端筛选 + 分页，预览里用同一套参数在内存里模拟
+  const query=new URLSearchParams(path.split('?')[1]||'');
+  const keyword=(query.get('search')||'').trim().toLowerCase();
+  const all=query.get('all')==='1'||query.get('enabledOnly')==='false';
+  let list=questions.filter(q=>(all||q.enabled!==false)
+   &&(!keyword||(q.q+' '+q.tip+' '+(q.a||[]).join(' ')+' '+(q.subject||'')+' '+(q.level||'')).toLowerCase().includes(keyword))
+   &&(!query.get('bank')||(q.bank||'默认题库')===query.get('bank'))
+   &&(!query.get('type')||(q.type||'single')===query.get('type'))
+   &&(!query.get('subject')||(q.subject||'')===query.get('subject'))
+   &&(!query.get('level')||(q.level||'')===query.get('level'))
+   &&(!query.get('difficulty')||String(q.difficulty||2)===query.get('difficulty'))
+   &&(query.get('wrong')!=='1'||q.stats?.lastCorrect===false));
+  const sort=query.get('sort')||'random';
+  if(sort==='diff')list=[...list].sort((a:any,b:any)=>(b.difficulty||2)-(a.difficulty||2));
+  else if(sort==='type')list=[...list].sort((a:any,b:any)=>String(a.type).localeCompare(String(b.type))||(b.difficulty||2)-(a.difficulty||2));
+  const offset=Number(query.get('offset')||0),limit=Number(query.get('limit')||500);
+  return structuredClone({items:list.slice(offset,offset+limit),total:list.length,offset,limit});
+ }
+ if(route==='/api/questions/meta'){
+  const banks=[...new Set(questions.map((q:any)=>q.bank||'默认题库'))].sort();
+  const subjects=[...new Set(questions.map((q:any)=>q.subject).filter(Boolean))].sort();
+  const levels=[...new Set(questions.map((q:any)=>q.level).filter(Boolean))].sort();
+  return {banks,subjects,levels,total:questions.length,
+   enabled:questions.filter((q:any)=>q.enabled!==false).length,
+   paused:questions.filter((q:any)=>q.enabled===false).length,
+   wrong:questions.filter((q:any)=>q.stats?.lastCorrect===false).length};
  }
  if(route==='/api/banks/market')return structuredClone({sources:bankSources,banks:bankSources.length>1?marketBanks.concat({...marketBanks[1],name:'家长自编 20 题',url:'https://example.com/banks/parent.json',source:'家长共享'}):marketBanks.filter(b=>b.source==='官方题库'),failed:[]});
  if(route==='/api/banks/sources'){
@@ -83,7 +109,14 @@ export async function previewApi(path:string,method:string,body:any){
  if(route==='/api/device/launcher'){device.launcherHidden=!!body.hidden;return{ok:true,launcherHidden:device.launcherHidden};}
  if(route==='/api/device/desktop'){device.desktop={...device.desktop,enabled:!!body.enabled,isDefault:!!body.enabled&&device.desktop.isDefault};return structuredClone(device.desktop);}
  if(route==='/api/device/desktop/choose'){if(device.desktop.enabled)device.desktop.isDefault=true;return structuredClone(device.desktop);}
- if(route==='/api/device/bugly'){device.buglyConsent=!!body.enabled;return{ok:true};}
+ if(route==='/api/device/crash'){
+  const next={...device.crashUpload};
+  if('consent' in body)next.consent=!!body.consent;
+  if('endpoint' in body)next.endpoint=String(body.endpoint||'');
+  if(body.token)next.hasToken=true;
+  device.crashUpload=next;
+  return{ok:true,crashUpload:structuredClone(next)};
+ }
  if(route==='/api/grading'){if(method==='PUT')grading={...grading,...body};return structuredClone(grading);}
  if(route==='/api/reviews'){
   const query=new URLSearchParams(path.split('?')[1]||'');
