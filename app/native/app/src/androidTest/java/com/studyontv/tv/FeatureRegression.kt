@@ -4,6 +4,8 @@ import android.content.Context
 import android.os.SystemClock
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Calendar
+import java.util.TimeZone
 
 object FeatureRegression {
     /** 单独跑隐藏桌面图标（-e launcher 1），改这块时不用等整套回归 */
@@ -169,6 +171,7 @@ object FeatureRegression {
             wrongBank(context)
             launcherIcon(context)
             try { BankAutomation.save(store, JSONObject().put("sources", JSONArray().put(JSONObject().put("name", "invalid").put("url", "file:///tmp/bank.json"))));error("invalid source accepted") } catch (_: IllegalArgumentException) { }
+            timezone(store)
         } finally { store.close();context.deleteDatabase(name) }
     }
     /** #132：多孩子档案——学习状态、规则、事件、复习进度都按孩子隔离 */
@@ -447,6 +450,62 @@ object FeatureRegression {
             check(after.length() == 1 && after.getJSONObject(0).getString("q") == "original") { "同步失败必须回滚已更新的题目" }
             check(after.getJSONObject(0).getString("id") == original.getString("id"))
         } finally { server.close();thread.join(2000) }
+    }
+    /**
+     * 时区：可用时段和「今天」的界线按配置的时区算。
+     * 场景是电视机系统时区固定在国内、人已经搬到国外，或者反过来。
+     */
+    private fun timezone(store: LocalStore) {
+        val engine = LearningEngine(store)
+        val before = store.config().optString("timezone")
+        try {
+            // 官方题库仓库在国内走 Gitee 镜像，只映射这个仓库的地址
+            check(BankMarket.giteeMirror("https://cdn.jsdelivr.net/gh/chadyi/StudyOnTV-banks@main/banks/open-play.json")
+                == "https://gitee.com/chadyi/StudyOnTV-banks/raw/main/banks/open-play.json")
+            check(BankMarket.giteeMirror("https://raw.githubusercontent.com/chadyi/StudyOnTV-banks/main/index.json")
+                == "https://gitee.com/chadyi/StudyOnTV-banks/raw/main/index.json")
+            check(BankMarket.giteeMirror("https://example.com/bank.json") == null) { "家长自己填的源不改写" }
+
+            store.saveConfig(JSONObject().put("timezone", "America/New_York"))
+            try { store.saveConfig(JSONObject().put("timezone", "Mars/Olympus"));error("unknown zone accepted") } catch (_: IllegalArgumentException) { }
+            check(DeviceClock.setting(store) == "America/New_York") { "未知时区不能写进配置" }
+            // 引擎和「今天」的起点都跟着配置的时区走
+            val newYork = TimeZone.getTimeZone("America/New_York")
+            val offset = (engine.now().get(Calendar.ZONE_OFFSET) + engine.now().get(Calendar.DST_OFFSET)) / 3600000
+            check(offset == newYork.getOffset(System.currentTimeMillis()) / 3600000) { "引擎应使用配置的时区" }
+            val day = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm").apply { timeZone = newYork }
+            val start = day.format(java.util.Date(store.startOfToday()))
+            check(start.endsWith("00:00") && start == day.format(java.util.Date(System.currentTimeMillis())).take(10) + " 00:00") { "「今天」的起点按配置时区算: $start" }
+
+            // 同一个时刻：上海 09:10、纽约前一天 20:10，窗口只开 09:00–10:00
+            val instant = Calendar.getInstance(TimeZone.getTimeZone("Asia/Shanghai")).apply {
+                set(2030, Calendar.JANUARY, 7, 9, 10, 0);set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            val slots = JSONArray().apply { repeat(7) { put("0".repeat(18) + "11" + "0".repeat(28)) } }
+            store.saveConfig(JSONObject().put("timezone", "Asia/Shanghai").put("allDay", false).put("scheduleMode", "allow")
+                .put("weekSlots", slots).put("dailyLimitEnabled", false).put("roundsLimitEnabled", false)
+                .put("dailyFreeMinutes", 0).put("bootFreeMinutes", 0).put("restEnabled", false)
+                .put("timePoints", JSONArray()).put("exemptWindows", JSONArray()))
+            store.set("remote_override", "");store.set("feedback_deadline", "")
+            engine.remote("credit", 30, "tz-test")
+            fun at(zone: String) = Calendar.getInstance(TimeZone.getTimeZone(zone)).apply { timeInMillis = instant }
+            engine.now = { at("Asia/Shanghai") }
+            check(engine.status().getString("reason").isEmpty()) { "上海时间在时段内应可用: ${engine.status()}" }
+            engine.now = { at("America/New_York") }
+            check(engine.status().getString("reason") == "schedule") { "纽约时间在时段外应锁定: ${engine.status()}" }
+            engine.now = { at("UTC") }
+            val utc = engine.status()
+            check(utc.getString("reason") == "schedule")
+            // 「下次可用」按配置的时区显示，而不是设备时区
+            check(utc.optString("nextAtText").let { it.contains("月") && it.contains("日") && it.endsWith(":00") }) { "下次可用文案: $utc" }
+            val fourAm = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                set(2026, Calendar.JANUARY, 5, 4, 0, 0);set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            check(DeviceClock.format(fourAm, store) == "1 月 5 日 12:00") { "UTC 04:00 在上海应是 12:00" }
+        } finally {
+            engine.now = { DeviceClock.calendar(store) }
+            store.saveConfig(JSONObject().put("timezone", before))
+        }
     }
     private fun answer(round: JSONObject, selection: Int) = JSONObject().put("roundId", round.getString("id"))
         .put("nonce", round.getString("nonce")).put("selections", JSONArray().put(selection))

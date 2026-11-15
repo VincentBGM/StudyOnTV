@@ -399,8 +399,12 @@
     $('lockTitle').textContent = reason === 'schedule' ? '还没到可用时间' : reason === 'rounds' ? '今天的任务已全部完成' : reason === 'quota' ? '今天的使用时间已用完' : '使用时间到了';
     var when = '';
     if (state.learning.nextAvailableAt) {
-      var date = new Date(state.learning.nextAvailableAt);
-      when = (date.getMonth() + 1) + ' 月 ' + date.getDate() + ' 日 ' + ('0' + date.getHours()).slice(-2) + ':' + ('0' + date.getMinutes()).slice(-2);
+      // 服务端按家长设置的时区算好文案，设备时区不对时也能和规则对得上
+      when = state.learning.nextAtText || '';
+      if (!when) {
+        var date = new Date(state.learning.nextAvailableAt);
+        when = (date.getMonth() + 1) + ' 月 ' + date.getDate() + ' 日 ' + ('0' + date.getHours()).slice(-2) + ':' + ('0' + date.getMinutes()).slice(-2);
+      }
     }
     $('lockDesc').textContent = when ? '下次可用：' + when : reason === 'timeup' ? '完成学习任务后才能使用设备' : '现在暂不可用';
     $('lockNote').textContent = state.config.allDay ? '' : '可用时段 ' + state.config.windowStart + ' — ' + state.config.windowEnd;

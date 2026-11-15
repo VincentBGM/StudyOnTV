@@ -197,7 +197,7 @@ class LanServer(
             path == "/api/holidays" && method == "GET" -> return json(out, 200, HolidayService.info(context))
             path == "/api/holidays/sync" && method == "POST" -> {
                 val year = query.split("&").mapNotNull { part -> part.split("=").takeIf { it.size == 2 && it[0] == "year" }?.get(1)?.toIntOrNull() }.firstOrNull()
-                    ?: java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+                    ?: DeviceClock.calendar(store).get(java.util.Calendar.YEAR)
                 return try {
                     json(out, 200, HolidayService.fetch(context, year))
                 } catch (e: Exception) {
@@ -372,6 +372,8 @@ class LanServer(
                 .put("version", BuildConfig.VERSION_NAME).put("flavor", BuildConfig.FLAVOR).put("ip", localIp() ?: "").put("port", boundPort)
                 .put("uninstallProtected", UninstallGuard.active(context)).put("deviceOwner", UninstallGuard.owner(context))
                 .put("launcherHidden", LauncherIcon.hidden(context)).put("desktop", DesktopMode.state(context)).put("autostart", Watchdog.report(context)).put("monitor", GateService.diagnostics(context))
+                // 家长在别的时区时，面板要能看出「设备现在几点」到底按哪个时区算
+                .put("timezone", DeviceClock.describe(store)).put("deviceTime", DeviceClock.calendar(store).time.toString())
                 .put("keepalive", KeepAlive.report(context)).put("buglyConsent", Prefs.buglyConsent(context)))
             path == "/api/device/bugly" && method == "PUT" -> {
                 val enabled = JSONObject(body).optBoolean("enabled")

@@ -16,7 +16,7 @@ import {Select,SelectTrigger,SelectValue,SelectContent,SelectItem} from '@/compo
 import {Tabs,TabsContent,TabsList,TabsTrigger} from '@/components/ui/tabs';
 import {Card,CardContent} from '@/components/ui/card';
 import {api} from './api';
-import {defaults,ruleSchema,type Rules} from './schema';
+import {defaults,ruleSchema,zoneOptions,type Rules} from './schema';
 import SpeechSettings from './SpeechSettings';
 import TimePoints from './TimePoints';
 import WeekSchedule from './WeekSchedule';
@@ -120,6 +120,9 @@ export default function RulesPage({state,sessionId}:{state:any,sessionId:number}
  // 必须和 QuestionBank 用完全相同的 URL：两处共用 ['bank',…] 这个 queryKey，
  // URL 不一致时先挂载的一方会把不完整的数据写进缓存（暂停的题在题库页凭空消失）。
  const bank=useQuery({queryKey:['bank',sessionId],queryFn:()=>api('/api/questions?limit=50000&enabledOnly=false')});
+ const device=useQuery({queryKey:['device',sessionId],queryFn:()=>api('/api/device')});
+ // Radix 的 SelectItem 不接受空字符串，所以「跟随设备」在控件里用 device 代替
+ const zoneChoices=zoneOptions.map(([value,label])=>[value||'device',label] as [string,string]);
  const scopeSubjects:any[]=[...new Set((bank.data?.items||[]).map((q:any)=>q.subject).filter(Boolean))].sort();
  const scopeLevels:any[]=[...new Set((bank.data?.items||[]).map((q:any)=>q.level).filter(Boolean))].sort();
  const scopeBanks:any[]=[...new Set((bank.data?.items||[]).map((q:any)=>q.bank||'默认题库'))].sort();
@@ -288,6 +291,10 @@ export default function RulesPage({state,sessionId}:{state:any,sessionId:number}
       <Field orientation="responsive" className="py-4">
        <FieldContent><FieldTitle>强制使用全屏学习页</FieldTitle><FieldDescription className="text-xs leading-5">适合悬浮窗被视频遮挡的电视（如海信 VIDAA）</FieldDescription></FieldContent>
        {toggle('forceFullscreenGate')}
+      </Field>
+      <Field orientation="responsive" className="py-4">
+       <FieldContent><FieldTitle>时区</FieldTitle><FieldDescription className="text-xs leading-5">可用时段、全天可用和「今天」的重置都按这个时区算。{!c.timezone&&device.data?.timezone?`设备当前：${device.data.timezone}`:'人在国外或设备时间固定在国内时区时改这里。'}</FieldDescription></FieldContent>
+       <Choice value={c.timezone||'device'} onChange={v=>change('timezone',v==='device'?'':v)} options={zoneChoices} label="时区"/>
       </Field>
       <Field orientation="responsive" className="py-4">
        <FieldContent><FieldTitle>全天管控</FieldTitle><FieldDescription className="text-xs leading-5">忽略上面的时段设置</FieldDescription></FieldContent>

@@ -327,6 +327,8 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
             .put("quizSubjects", JSONArray()).put("quizLevels", JSONArray())
             // 网课时段 / 大人豁免（Issue #112）：旧配置没有这两个键，默认空数组 = 完全沿用旧行为
             .put("timePoints", JSONArray()).put("exemptWindows", JSONArray())
+            // 使用时区：留空 = 跟随设备。国外用户 / 设备时区不对时由家长指定
+            .put("timezone", "")
             .put("version", 1)
         val saved = try { JSONObject(get("config", "{}")) } catch (e: Exception) { JSONObject() }
         saved.keys().forEach { defaults.put(it, saved.get(it)) }
@@ -451,6 +453,12 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
                 require(wantsAllDay || valid) { "请输入有效的开始和结束时间" }
                 if (valid) next.put(key, input.getString(key))
             }
+        }
+        if (input.has("timezone")) {
+            // 空串 = 跟随设备时区；其余必须是白名单里的 IANA 名称
+            val zone = input.optString("timezone").trim()
+            require(zone in DeviceClock.ZONES) { "不支持的时区" }
+            next.put("timezone", zone)
         }
         if (input.has("passRatio")) {
             val ratio = input.getDouble("passRatio")
@@ -757,7 +765,7 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
     fun historyDays(days: Int = 7): JSONArray {
         val out = JSONArray()
         for (d in 0 until days.coerceIn(1, 90)) {
-            val cal = Calendar.getInstance()
+            val cal = DeviceClock.calendar(this)
             cal.timeInMillis = startOfToday()
             cal.add(Calendar.DAY_OF_YEAR, -d)
             val start = cal.timeInMillis
@@ -768,7 +776,7 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
         return out
     }
 
-    fun startOfToday(): Long = Calendar.getInstance().apply {
+    fun startOfToday(): Long = DeviceClock.calendar(this).apply {
         set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
     }.timeInMillis
 }

@@ -67,7 +67,8 @@ class LearningEngine(private val store: LocalStore) {
     }
 
     /** 测试可以固定时钟（例如验证跨午夜窗口）；生产环境始终是系统时间。 */
-    internal var now: () -> Calendar = { Calendar.getInstance() }
+    // 规则里的时段和「今天」都按家长选的时区算（默认跟随设备，见 DeviceClock）
+    internal var now: () -> Calendar = { DeviceClock.calendar(store) }
 
     /** 一个命中的网课时段或大人豁免窗口。 */
     private class Window(val name: String, val days: Set<Int>, val start: Int, val end: Int,
@@ -205,10 +206,10 @@ class LearningEngine(private val store: LocalStore) {
         return slots[dayIndex(config, cal)].getOrNull(minute / 30) == '1'
     }
 
-    private fun inWindow(config: JSONObject): Boolean = allowedAt(config, Calendar.getInstance())
+    private fun inWindow(config: JSONObject): Boolean = allowedAt(config, now())
 
     private fun nextAvailable(config: JSONObject, tomorrow: Boolean): Long {
-        val base = Calendar.getInstance()
+        val base = now()
         if (tomorrow) {
             base.add(Calendar.DAY_OF_YEAR, 1)
             base.set(Calendar.HOUR_OF_DAY, 0); base.set(Calendar.MINUTE, 0)
@@ -340,7 +341,7 @@ class LearningEngine(private val store: LocalStore) {
         return JSONObject().put("remainingSeconds", remaining / 1000).put("usedMinutes", used / 60000.0)
             .put("quizGeneration", number("quiz_generation"))
             .put("extraPool", number("extra_pool")).put("wrongProgress", number("wrong_progress"))
-            .put("nextAvailableAt", nextAt).put("free", free)
+            .put("nextAvailableAt", nextAt).put("nextAtText", if (nextAt > 0) DeviceClock.format(nextAt, store) else "").put("free", free)
             .put("restSeconds", (rest + 999) / 1000).put("feedbackSeconds", (hold + 999) / 1000)
             .put("todayLimitMinutes", if (c.optBoolean("dailyLimitEnabled", true)) time.dailyLimit(limit) / 60000.0 else JSONObject.NULL)
             .put("bootFreeSeconds", min(number("boot_quota_ms"), freeQuota) / 1000)
