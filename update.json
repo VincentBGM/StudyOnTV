@@ -1,21 +1,21 @@
 {
-  "version": "0.3.35",
-  "versionCode": 40,
+  "version": "0.3.36",
+  "versionCode": 41,
   "force": false,
-  "notes": "• 修复电视上「内置更新装不上」：没开「安装未知应用」时按钮会直接带你去开，开完点一次即可；安装失败会显示系统原始原因\n• 修复华为智慧屏、TCL 等电视点「朗读题目」没声音：失败会提示原因，家长面板可改用 DeepSeek 语音（合成 + 语音识别）\n• 家长面板地址可直接用「电视IP:8099」打开，不用再加 /admin\n• 题库单次导入上限提高到 50000 题\n• 带电视桌面的内测包不再随版本发布",
-  "publishedAt": "2026-11-14T15:40:00Z",
+  "notes": "• 新增「时区」：人在国外或电视系统时区不对时，可用时段、「今天」重置和「下次可用」都按指定时区算，默认跟随设备\n• 修复家长面板里朗读 Key 填好却被自动保存清空的问题，保存后 Key 会保留并提示「密钥已保存」；读不到设置时可以点「重试」\n• 官方题库拉不到时自动改走 Gitee 镜像，国内网络更稳",
+  "publishedAt": "2026-11-15T05:04:02.209Z",
   "assets": {
     "tv": {
-      "name": "StudyOnTV-Android-TV-v0.3.35.apk",
-      "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.3.35/StudyOnTV-Android-TV-v0.3.35.apk",
-      "sha256": "fab2255a8719729af9122b071fe17c2b7a32e6955a9e9d17077df2c801778b84",
-      "size": 3407174
+      "name": "StudyOnTV-Android-TV-v0.3.36.apk",
+      "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.3.36/StudyOnTV-Android-TV-v0.3.36.apk",
+      "sha256": "fb2cff5758cacd35db8368d8828b248dc368b1a085d9542db78a57fe737b8f80",
+      "size": 3409558
     },
     "mobile": {
-      "name": "StudyOnTV-Mobile-v0.3.35.apk",
-      "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.3.35/StudyOnTV-Mobile-v0.3.35.apk",
-      "sha256": "85a9560217ea8c1cf32dad58b59b8c533247987dc387d9f16275a9a2471342ab",
-      "size": 3409790
+      "name": "StudyOnTV-Mobile-v0.3.36.apk",
+      "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.3.36/StudyOnTV-Mobile-v0.3.36.apk",
+      "sha256": "1b32e9f77200625930ce0bb6281ceabf2c224a72b8cbae4c9acfc7b7ae787e73",
+      "size": 3412394
     }
   }
 }
