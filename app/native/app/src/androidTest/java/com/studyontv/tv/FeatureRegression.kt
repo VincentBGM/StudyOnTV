@@ -170,6 +170,7 @@ object FeatureRegression {
             children(store, engine)
             wrongBank(context)
             coverage(context)
+            questionPaging(context)
             launcherIcon(context)
             try { BankAutomation.save(store, JSONObject().put("sources", JSONArray().put(JSONObject().put("name", "invalid").put("url", "file:///tmp/bank.json"))));error("invalid source accepted") } catch (_: IllegalArgumentException) { }
             timezone(store)
@@ -315,6 +316,56 @@ object FeatureRegression {
         }
     }
 
+    /**
+     * 题库页分页：筛选 / 搜索 / 分页都在 SQL 里做，只返回一页；
+     * bank / type 提成独立列后，题库筛选和删除题库不再全表解析 details。
+     */
+    private fun questionPaging(context: Context) {
+        val name = "feature-page.db"
+        context.deleteDatabase(name)
+        LocalStore(context, name).use { store ->
+            repeat(60) { i ->
+                val bank = if (i % 3 == 0) "语文" else "数学"
+                store.upsertQuestion(JSONObject()
+                    .put("id", "p$i")
+                    .put("q", if (i % 10 == 0) "分数 100% 练习 $i" else "题目 $i")
+                    .put("a", JSONArray(listOf("A", "B"))).put("k", 0)
+                    .put("bank", bank).put("level", if (i % 3 == 0) "二年级" else "一年级")
+                    .put("subject", "常识").put("type", "single"))
+            }
+            store.upsertQuestion(JSONObject("""{"id":"paused","q":"暂停题","a":["A","B"],"correctIndices":[0],"bank":"数学","type":"multiple"}"""))
+            store.setEnabled(listOf("paused"), false)
+
+            val first = store.questionPage(limit = 25, offset = 0)
+            check(first.getInt("total") == 60) { "启用题应当是 60 道: $first" }
+            check(first.getJSONArray("items").length() == 25) { "一页只该返回 25 道: $first" }
+            check(first.getInt("limit") == 25 && first.getInt("offset") == 0)
+            check(store.questionPage(limit = 25, offset = 50).getJSONArray("items").length() == 10) { "最后一页只该有 10 道" }
+            check(store.questionPage(enabledOnly = false, limit = 1).getInt("total") == 61) { "含暂停题应当是 61 道" }
+
+            // 题库 / 题型筛选走独立列
+            check(store.questionPage(bank = "数学", limit = 100).getInt("total") == 40) { "数学题库应当是 40 道" }
+            check(store.idsInBank("数学").size == 41) { "删除题库要按 bank 列找题，含已暂停的题" }
+            check(store.questionPage(type = "multiple", limit = 100).getInt("total") == 0) { "唯一的多选题已暂停，默认不该出现" }
+            check(store.questionPage(type = "multiple", enabledOnly = false, limit = 100).getInt("total") == 1) { "多选筛选要按 type 列" }
+
+            // 搜索：题干命中；% 是普通字符，不能当通配符扫全库
+            check(store.questionPage(search = "分数", limit = 100).getInt("total") == 6)
+            check(store.questionPage(search = "100%", limit = 100).getInt("total") == 6) { "百分号要当普通字符搜索" }
+            check(store.questionPage(search = "题目 7", limit = 100).getInt("total") == 1) { "搜索要能定位到单题" }
+
+            // 错题筛选与题库页计数
+            store.answered("p0", false)
+            check(store.questionPage(wrongOnly = true).getInt("total") == 1) { "错题筛选只应有 1 道" }
+            val meta = store.questionMeta()
+            check(meta.getInt("total") == 61 && meta.getInt("paused") == 1 && meta.getInt("wrong") == 1) { "题库页计数不对: $meta" }
+            val banks = meta.getJSONArray("banks")
+            check(banks.length() == 2 && banks.getString(0) == "数学" && banks.getString(1) == "语文") { "题库名列表不对: $meta" }
+            check(meta.getJSONArray("levels").length() == 2) { "年级列表不对: $meta" }
+        }
+        context.deleteDatabase(name)
+    }
+
     /** 隐藏桌面图标：只关启动入口 alias，MainActivity 和进程不受影响，随时可以恢复 */
     private fun launcherIcon(context: Context) {
         val pm = context.packageManager
@@ -455,7 +506,7 @@ object FeatureRegression {
                 old.writableDatabase.version = 7
             }
             LocalStore(context, v7).use { migrated ->
-                check(migrated.readableDatabase.version == 8)
+                check(migrated.readableDatabase.version == 9)
                 val stats = migrated.questions().getJSONObject(0).getJSONObject("stats")
                 check(stats.getInt("answered") == 1 && stats.getInt("correct") == 1) { "升级不能丢掉旧统计: $stats" }
                 check(stats.isNull("lastCorrect")) { "旧库没有最近一次对错，应当当作未作答: $stats" }
@@ -463,6 +514,23 @@ object FeatureRegression {
                 check(migrated.questions().getJSONObject(0).getJSONObject("stats").get("lastCorrect") == false) { "升级后要能记错题" }
             }
         } finally { context.deleteDatabase(v7) }
+        // 第 9 版：bank / type 从 details 回填成独立列，老数据升级后题库筛选、删除题库要照常可用
+        val v8 = "migration-v8-regression.db"
+        context.deleteDatabase(v8)
+        try {
+            LocalStore(context, v8).use { old ->
+                // 直接按第 8 版的列写一行，bank / type 只存在 details 里
+                old.writableDatabase.execSQL(
+                    "INSERT INTO questions(id,subject,level,difficulty,stem,options,answer,tip,enabled,created_at,details) VALUES('legacy','常识','一年级',2,'老题','[\"A\",\"B\"]',0,'',1,0,?)",
+                    arrayOf(JSONObject().put("bank", "老题库").put("type", "multiple").toString()))
+                old.writableDatabase.version = 8
+            }
+            LocalStore(context, v8).use { migrated ->
+                check(migrated.readableDatabase.version == 9)
+                check(migrated.idsInBank("老题库") == listOf("legacy")) { "升级时要按 details 回填题库列" }
+                check(migrated.questionPage(bank = "老题库", type = "multiple").getInt("total") == 1) { "升级后题库筛选要能用" }
+            }
+        } finally { context.deleteDatabase(v8) }
     }
     private fun remoteSync(store: LocalStore) {
         val server = java.net.ServerSocket(0, 4, java.net.InetAddress.getByName("127.0.0.1"))

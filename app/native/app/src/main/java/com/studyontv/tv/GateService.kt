@@ -34,9 +34,6 @@ class GateService : Service() {
     private var gateFailures = 0
     private var lastGateError = ""
     private var lastGateErrorAt = -1L
-    private var muteMismatchSince = -1L
-    private var lastMuteMismatchAt = -1L
-    private var lastMuteMismatchLogAt = 0L
     /** 上一轮 tick 的状态：mediaTick / diagnostics 用它做「静音是否同源」的纯函数判定 */
     @Volatile private var freeNow = false
     @Volatile private var gateExpectedNow = false
@@ -51,7 +48,6 @@ class GateService : Service() {
     @Volatile private var foregroundPackage: String? = null
     @Volatile private var ownActivityForeground = false
     @Volatile private var monitoringNow = false
-    @Volatile private var settingsUntil = 0L
     /**
      * 屏幕是否亮着。TCL 电视「关机」（未断电）后 PowerManager 仍报 interactive，
      * 计时会照走；系统广播和显示状态任一说熄灭就按熄灭处理。
@@ -64,9 +60,6 @@ class GateService : Service() {
                 Intent.ACTION_SCREEN_OFF -> screenOn = false
             }
         }
-    }
-    private val systemSettingsPackage by lazy {
-        packageManager.resolveActivity(Intent(android.provider.Settings.ACTION_SETTINGS), 0)?.activityInfo?.packageName
     }
     private var anchor: View? = null
     private lateinit var overlay: GateOverlay
@@ -96,7 +89,7 @@ class GateService : Service() {
             countdown.hide()
             return
         }
-        if (now < settingsUntil) { wasUsing = false; hideAll(); countdown.hide(); if (MediaPause.active) releaseMuteWithoutGate("settings"); return }
+        if (SystemSettingsGuard.active(now)) { wasUsing = false; hideAll(); countdown.hide(); if (MediaPause.active) releaseMuteWithoutGate("settings"); return }
         val power = getSystemService(POWER_SERVICE) as PowerManager
         val locked = (getSystemService(KEYGUARD_SERVICE) as KeyguardManager).isKeyguardLocked
         val awake = power.isInteractive && !locked && screenOn && displayOn()
@@ -127,26 +120,26 @@ class GateService : Service() {
         }
         val protecting = awake && monitoring && !ownForeground && (pkg == null || !exempt(pkg, false))
         val reason = status.getString("reason")
-        val settingsBlocked = awake && monitoring && !free && pkg != null && isSettings(pkg) &&
-            DeviceRuntime.store.config().optBoolean("blockSettingsDuringControl", true) && !AdminAuth.recentlyVerified()
+        val settingsBlocked = SystemSettingsGuard.blocked(this, awake, monitoring, free, pkg,
+            DeviceRuntime.store.config().optBoolean("blockSettingsDuringControl", true), AdminAuth.recentlyVerified())
         val gateReason = if (settingsBlocked) "settings" else reason
         val pendingFeedback = DeviceRuntime.store.get("review_feedback").isNotEmpty()
         val practice = DeviceRuntime.store.config().optString("playMode") == "practice"
         // 一次 tick 内统一口径：什么情况下应该有 Gate（静音与弹窗共用这个判断）
         gateExpectedNow = !free && (gateReason.isNotEmpty() || pendingFeedback || practice)
         val feedbackVisible = !free && hasGate() && pendingFeedback
-        if (!free) Foreground.learningActivity()?.let {
-            if (gateExpectedNow) MediaPause.pause(it) else MediaPause.release(it)
-        }
+        AudioController.syncLearningActivity(free, gateExpectedNow)
         wasUsing = active && !free && reason.isEmpty() && !feedbackVisible
         if (!awake || !monitoring || (!settingsBlocked && (ownForeground || (reason.isEmpty() && !feedbackVisible) || (pkg != null && exempt(pkg, false))))) hideAll()
         val snapshot = "reason=$gateReason free=$free awake=$awake screen=$screenOn monitoring=$monitoring own=$ownForeground pkg=$pkg cls=${pkg?.let { Foreground.currentClass(it) }} active=$active gate=${hasGate()} overlay=$canOverlay mute=${MediaPause.active} failures=$gateFailures"
         if (snapshot != lastDiag) { lastDiag = snapshot; Diag.info("Gate", snapshot) }
-        ensureGateVisible(now, gateReason, canOverlay, protecting, settingsBlocked)
+        val state = GateTickState(now, free, awake, screenOn, monitoring, canOverlay, ownForeground, pkg,
+            gateExpectedNow, gateReason, settingsBlocked, active, protecting)
+        ensureGateVisible(state)
         // #110：静音必须由「真的弹出来了」背书——弹窗失败或被收起后立刻解除静音，
         // 否则出现「视频被静音了，却没人来答题」。
         if (MediaPause.active && !muteBackedByVisibleGate()) releaseMuteWithoutGate("foreground")
-        updateCountdown(status, active, free, canOverlay, awake, monitoring, ownForeground, settingsBlocked, pkg)
+        updateCountdown(status, state)
     }
 
     /**
@@ -158,7 +151,12 @@ class GateService : Service() {
      *    或 10s 兜底通知节流把重试吞掉；
      * 3. 失败时全屏 Activity 每次都试一把（SINGLE_TOP 去重），通知单独节流 10s。
      */
-    private fun ensureGateVisible(now: Long, gateReason: String, canOverlay: Boolean, protecting: Boolean, settingsBlocked: Boolean) {
+    private fun ensureGateVisible(state: GateTickState) {
+        val now = state.at
+        val gateReason = state.gateReason
+        val canOverlay = state.canOverlay
+        val protecting = state.protecting
+        val settingsBlocked = state.settingsBlocked
         // attach 了却一直不可见：不能算「已弹出」，当作失败并重试（hide 会解除静音）
         if (overlay.isShowing && !overlay.presenting(now)) {
             lastGateError = overlay.lastError.ifEmpty { "overlay attached but not visible kind=${overlay.lastErrorKind}" }
@@ -326,27 +324,23 @@ class GateService : Service() {
         fallbackPending = lastFallbackActivityAt > 0 && SystemClock.elapsedRealtime() - lastFallbackActivityAt < GatePresentation.FALLBACK_GRACE_MS)
 
     /** 静音是否允许：只有 Gate 真的可见（或答题输入页在前台）才允许持续静音/暂停 */
-    private fun muteBackedByVisibleGate(): Boolean = GatePresentation.muteAllowed(
-        gateVisible = gateShown(), inputActive = InputSupport.active, free = freeNow)
+    private fun muteBackedByVisibleGate(): Boolean = AudioController.allowed(gateShown(), freeNow)
 
     /** 静音与弹窗不同源：立即解除静音，并在诊断里留下可读的一笔（issue #110） */
-    private fun releaseMuteWithoutGate(source: String) {
-        val now = SystemClock.elapsedRealtime()
-        if (muteMismatchSince < 0) muteMismatchSince = now
-        lastMuteMismatchAt = now
-        if (now - lastMuteMismatchLogAt > 5000) {
-            lastMuteMismatchLogAt = now
-            val age = if (MediaPause.lastPauseAt > 0) (now - MediaPause.lastPauseAt) / 1000 else 0
-            Diag.warn("Audio", "mute-without-gate($source): 已静音${age}s owners=${MediaPause.ownerCount} gate=${hasGate()} " +
-                "visible=${overlay.verifiedVisible} failures=$gateFailures reason=$lastGateError → release")
-        }
-        MediaPause.releaseAll(this)
-        muteMismatchSince = -1L
-    }
+    private fun releaseMuteWithoutGate(source: String) =
+        AudioController.releaseWithoutGate(this, source, gate = hasGate(), visible = overlay.verifiedVisible,
+            gateFailures = gateFailures, lastGateError = lastGateError)
 
     /** 看电视期间在画面右上角显示剩余分钟数；不在看电视 / 拦截中 / 自由时段 / 家长解锁时隐藏 */
-    private fun updateCountdown(status: org.json.JSONObject, active: Boolean, free: Boolean, canOverlay: Boolean,
-                                awake: Boolean, monitoring: Boolean, ownForeground: Boolean, settingsBlocked: Boolean, pkg: String?) {
+    private fun updateCountdown(status: org.json.JSONObject, state: GateTickState) {
+        val active = state.active
+        val free = state.free
+        val canOverlay = state.canOverlay
+        val awake = state.awake
+        val monitoring = state.monitoring
+        val ownForeground = state.ownForeground
+        val settingsBlocked = state.settingsBlocked
+        val pkg = state.foregroundPackage
         val now = SystemClock.elapsedRealtime()
         if (active) { countdownActiveAt = now; countdownPackage = pkg }
         // 同一播放器短暂缓冲时保留角标，切换应用、关屏或进入管控页仍立即隐藏。
@@ -526,13 +520,10 @@ class GateService : Service() {
         state == null || state != android.view.Display.STATE_OFF
     } catch (_: Exception) { true }
 
-    private fun isSettings(pkg: String): Boolean = pkg == systemSettingsPackage ||
-        pkg in setOf("com.android.settings", "com.android.tv.settings", "com.google.android.tv.settings")
-
     private fun exempt(pkg: String, includeLauncher: Boolean = true): Boolean {
         if (pkg == packageName || pkg == "com.android.systemui" || pkg == "android" || pkg.contains("packageinstaller")) return true
         if (pkg.contains("permissioncontroller") || pkg.contains("inputmethod") || pkg.contains("keyboard")) return true
-        if (pkg == systemSettingsPackage || pkg in setOf("com.android.settings", "com.android.tv.settings", "com.google.android.tv.settings", "com.google.android.dialer", "com.android.dialer", "com.android.phone", "com.android.server.telecom", "com.android.emergency")) return true
+        if (SystemSettingsGuard.isSettings(this, pkg) || pkg in setOf("com.google.android.dialer", "com.android.dialer", "com.android.phone", "com.android.server.telecom", "com.android.emergency")) return true
         if (!includeLauncher) return false
         val launcher = packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0)?.activityInfo?.packageName
         return pkg == launcher || Foreground.isLauncher(pkg)
@@ -544,6 +535,8 @@ class GateService : Service() {
         UninstallGuard.restoreOwnerPolicy(this)
         overlay = GateOverlay(this, GateOverlay.applicationWindowType())
         instance = this
+        // 服务重建 = 新的一轮，静音/弹窗不同源的计时从零开始
+        AudioController.reset()
         Prefs.setServiceRunning(this, true)
         val channelId = "sotv_gate"
         val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
@@ -645,8 +638,8 @@ class GateService : Service() {
             val mute = MediaPause.active
             val gateVisible = GatePresentation.gateVisible(accessibilityGate, overlayPresenting, learningActivity, gateExpected)
             val mismatch = GatePresentation.inconsistentMute(mute, gateVisible, InputSupport.active, free)
-            val mismatchSince = service?.muteMismatchSince ?: -1L
-            val lastMismatchAt = service?.lastMuteMismatchAt ?: -1L
+            val mismatchSince = AudioController.mismatchSince
+            val lastMismatchAt = AudioController.lastMismatchAt
             val lastErrorAt = service?.lastGateErrorAt ?: -1L
             return org.json.JSONObject()
                 .put("service", running)
@@ -706,7 +699,7 @@ class GateService : Service() {
             Handler(Looper.getMainLooper()).post { instance?.overlay?.hide(); WatchAccessibilityService.hideGate() }
         }
         fun onOwnActivityResumed() {
-            instance?.settingsUntil = 0L
+            SystemSettingsGuard.revoke()
             Handler(Looper.getMainLooper()).post {
                 if (InputSupport.active) { instance?.overlay?.suspend(); WatchAccessibilityService.suspendGate() }
                 else { instance?.overlay?.hide(); WatchAccessibilityService.hideGate() }
@@ -721,7 +714,7 @@ class GateService : Service() {
          */
         fun allowInstallPage() {
             instance?.let { service ->
-                service.settingsUntil = SystemClock.elapsedRealtime() + 120000
+                SystemSettingsGuard.grant()
                 service.wasUsing = false
             }
             hideGates()
@@ -734,7 +727,7 @@ class GateService : Service() {
                     DeviceRuntime.store.config().optBoolean("blockSettingsDuringControl", true)
                 // Installation is allowed; it must not grant a child access to every Settings page.
                 if (!parentAuthorized && !AdminAuth.recentlyVerified() && canIdentify && settingsLocked) return
-                service.settingsUntil = SystemClock.elapsedRealtime() + 120000
+                SystemSettingsGuard.grant()
                 service.wasUsing = false
             }
             hideGates()

@@ -9,7 +9,7 @@ import org.json.JSONObject
 import java.util.Calendar
 import java.util.UUID
 
-class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLiteOpenHelper(context, databaseName, null, 8) {
+class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLiteOpenHelper(context, databaseName, null, 9) {
     companion object {
         val DEFAULT_PRAISE = listOf("太棒了！", "答对啦！", "完全正确！", "真厉害！", "好样的，继续保持！", "漂亮！你越来越熟练了")
         val DEFAULT_ENCOURAGE = listOf("没关系，记住正确答案就好", "差一点点，下一题加油！", "错误也是学习的一部分", "别灰心，再接再厉！")
@@ -24,7 +24,10 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
     }
 
     override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE questions(id TEXT PRIMARY KEY, subject TEXT, level TEXT, difficulty INTEGER, stem TEXT NOT NULL, options TEXT NOT NULL, answer INTEGER NOT NULL, tip TEXT, enabled INTEGER DEFAULT 1, created_at INTEGER, details TEXT)")
+        // bank / type 原来只存在 details 这个 JSON 字段里，题库页筛选、覆盖率统计都得全表扫描再逐行解析。
+        // 第 9 版起同时写成独立列，筛选和排序能走索引，details 仍是完整题目（导出格式不变）。
+        db.execSQL("CREATE TABLE questions(id TEXT PRIMARY KEY, subject TEXT, level TEXT, difficulty INTEGER, stem TEXT NOT NULL, options TEXT NOT NULL, answer INTEGER NOT NULL, tip TEXT, enabled INTEGER DEFAULT 1, created_at INTEGER, details TEXT, bank TEXT NOT NULL DEFAULT '默认题库', type TEXT NOT NULL DEFAULT 'single')")
+        createQuestionIndexes(db)
         db.execSQL("CREATE TABLE kv(k TEXT PRIMARY KEY, v TEXT)")
         db.execSQL("CREATE TABLE events(id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, payload TEXT, ts INTEGER, child TEXT NOT NULL DEFAULT '')")
         db.execSQL("CREATE INDEX idx_events_ts ON events(ts)")
@@ -48,6 +51,48 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
         }
         // 错题库（#136）：记录每题最近一次作答的结果，-1 表示还没作答过
         if (oldVersion < 8) addColumn(db, "question_stats", "last_correct", "INTEGER NOT NULL DEFAULT -1")
+        if (oldVersion < 9) {
+            // 题库 / 题型提成独立列并回填。回填用 Kotlin 解析 details，不依赖 JSON_EXTRACT
+            // （Android 5–11 自带的 SQLite 没有这个函数）。
+            addColumn(db, "questions", "bank", "TEXT NOT NULL DEFAULT '默认题库'")
+            addColumn(db, "questions", "type", "TEXT NOT NULL DEFAULT 'single'")
+            backfillQuestionColumns(db)
+            createQuestionIndexes(db)
+        }
+    }
+
+    private fun createQuestionIndexes(db: SQLiteDatabase) {
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_questions_bank ON questions(bank)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_questions_type ON questions(type)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_questions_enabled ON questions(enabled)")
+    }
+
+    /** 把老库里 details 的 bank / type 抄进新列；分批读，避免几万道题一次性塞进内存。 */
+    private fun backfillQuestionColumns(db: SQLiteDatabase) {
+        val statement = db.compileStatement("UPDATE questions SET bank=?,type=? WHERE id=?")
+        try {
+            var last = -1L
+            while (true) {
+                val rows = ArrayList<Triple<String, String, String>>()
+                db.rawQuery("SELECT rowid,id,details FROM questions WHERE rowid>? ORDER BY rowid LIMIT 500", arrayOf(last.toString())).use { c ->
+                    while (c.moveToNext()) {
+                        last = c.getLong(0)
+                        val details = try { JSONObject(c.getString(2)?.takeIf { it.isNotBlank() } ?: "{}") } catch (_: Exception) { JSONObject() }
+                        rows.add(Triple(c.getString(1), details.optString("bank").ifBlank { "默认题库" }, details.optString("type").ifBlank { "single" }))
+                    }
+                }
+                if (rows.isEmpty()) break
+                rows.forEach { (id, bank, type) ->
+                    statement.clearBindings()
+                    statement.bindString(1, bank)
+                    statement.bindString(2, type)
+                    statement.bindString(3, id)
+                    statement.executeUpdateDelete()
+                }
+            }
+        } finally {
+            statement.close()
+        }
     }
 
     private fun addColumn(db: SQLiteDatabase, table: String, column: String, type: String) {
@@ -116,11 +161,9 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
     fun idsInBank(bank: String): List<String> {
         require(bank.isNotBlank()) { "请选择题库" }
         val ids = mutableListOf<String>()
-        readableDatabase.rawQuery("SELECT id,details FROM questions", null).use { cursor ->
-            while (cursor.moveToNext()) {
-                val details = JSONObject(cursor.getString(1)?.takeIf { it.isNotBlank() } ?: "{}")
-                if (details.optString("bank", "默认题库") == bank) ids.add(cursor.getString(0))
-            }
+        // bank 是第 9 版加的独立列（有索引），不用再全表解析 details
+        readableDatabase.rawQuery("SELECT id FROM questions WHERE bank=?", arrayOf(bank)).use { cursor ->
+            while (cursor.moveToNext()) ids.add(cursor.getString(0))
         }
         return ids
     }
@@ -569,7 +612,16 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
             wrongFirst -> "$wrongTier, $base"
             else -> base
         }
-        readableDatabase.rawQuery("SELECT questions.*,COALESCE(stats.presented,0) AS presented,COALESCE(stats.answered,0) AS answered_count,COALESCE(stats.correct,0) AS correct_count,COALESCE(stats.last_correct,-1) AS last_correct FROM $source WHERE $where ORDER BY $order LIMIT ${limit.coerceIn(1, 50000)}", (joinArgs + args).toTypedArray()).use { c ->
+        return readQuestions(
+            "SELECT questions.*,COALESCE(stats.presented,0) AS presented,COALESCE(stats.answered,0) AS answered_count,COALESCE(stats.correct,0) AS correct_count,COALESCE(stats.last_correct,-1) AS last_correct FROM $source WHERE $where ORDER BY $order LIMIT ${limit.coerceIn(1, 50000)}",
+            (joinArgs + args).toTypedArray()
+        )
+    }
+
+    /** 题目行的统一映射：出题、题库页、导出共用，保证返回字段口径一致。 */
+    private fun readQuestions(sql: String, args: Array<String>): JSONArray {
+        val out = JSONArray()
+        readableDatabase.rawQuery(sql, args).use { c ->
             while (c.moveToNext()) {
                 val details = c.getString(c.getColumnIndexOrThrow("details"))
                 val item = if (details.isNullOrEmpty()) JSONObject() else JSONObject(details)
@@ -596,6 +648,85 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
         return out
     }
 
+    /** LIKE 里的通配符要转义，否则家长搜索「100%」会当成通配符扫全库。 */
+    private fun escapeLike(value: String): String =
+        value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+    /**
+     * 家长面板题库页用的分页查询：筛选、搜索、排序、分页全部在 SQL 里做，一次只取一页。
+     * 返回 { items, total, offset, limit }，total 是当前筛选条件下的总题数。
+     */
+    fun questionPage(
+        subject: String? = null, level: String? = null, bank: String? = null, search: String? = null,
+        type: String? = null, difficulty: Int? = null, wrongOnly: Boolean = false, enabledOnly: Boolean = true,
+        sortBy: String = "newest", limit: Int = 50, offset: Int = 0
+    ): JSONObject {
+        val where = StringBuilder(if (enabledOnly) "questions.enabled=1" else "1=1")
+        val args = mutableListOf<String>()
+        if (!subject.isNullOrEmpty()) { where.append(" AND questions.subject=?"); args.add(subject) }
+        if (!level.isNullOrEmpty()) { where.append(" AND questions.level=?"); args.add(level) }
+        if (!bank.isNullOrEmpty()) { where.append(" AND questions.bank=?"); args.add(bank) }
+        if (!type.isNullOrEmpty()) { where.append(" AND questions.type=?"); args.add(type) }
+        if (difficulty != null) { where.append(" AND questions.difficulty=?"); args.add(difficulty.toString()) }
+        // 错题库（#136）：最近一次答错；从没作答过的题 last_correct=-1，不算错题
+        if (wrongOnly) where.append(" AND stats.last_correct=0")
+        val keyword = search?.trim()?.takeIf { it.isNotEmpty() }
+        if (keyword != null) {
+            val like = "%${escapeLike(keyword)}%"
+            // 答案文本存在 options JSON 里，LIKE 一样能命中，和原来前端搜「题干+答案+解析」的口径接近
+            where.append(" AND (questions.stem LIKE ? ESCAPE '\\' OR questions.tip LIKE ? ESCAPE '\\' OR questions.options LIKE ? ESCAPE '\\' OR questions.subject LIKE ? ESCAPE '\\' OR questions.level LIKE ? ESCAPE '\\')")
+            repeat(5) { args.add(like) }
+        }
+        val source = "questions LEFT JOIN question_stats stats ON questions.id=stats.qid"
+        val total = readableDatabase.rawQuery("SELECT COUNT(*) FROM $source WHERE $where", args.toTypedArray()).use {
+            if (it.moveToFirst()) it.getInt(0) else 0
+        }
+        val order = when (sortBy) {
+            "random" -> "RANDOM()"
+            "oldest" -> "questions.created_at ASC, questions.rowid ASC"
+            "diff", "difficulty" -> "questions.difficulty DESC, questions.rowid DESC"
+            "type" -> "questions.type ASC, questions.difficulty DESC, questions.rowid DESC"
+            else -> "questions.created_at DESC, questions.rowid DESC"
+        }
+        val page = limit.coerceIn(1, 50000)
+        val start = offset.coerceAtLeast(0)
+        val items = readQuestions(
+            "SELECT questions.*,COALESCE(stats.presented,0) AS presented,COALESCE(stats.answered,0) AS answered_count,COALESCE(stats.correct,0) AS correct_count,COALESCE(stats.last_correct,-1) AS last_correct " +
+                "FROM $source WHERE $where ORDER BY $order LIMIT $page OFFSET $start",
+            args.toTypedArray()
+        )
+        return JSONObject().put("items", items).put("total", total).put("offset", start).put("limit", page)
+    }
+
+    /** 题库页的筛选项和计数：题库名 / 科目 / 年级 + 总题数、启用、暂停、错题数，不返回题目内容。 */
+    fun questionMeta(): JSONObject {
+        val banks = sortedSetOf<String>()
+        val subjects = sortedSetOf<String>()
+        val levels = sortedSetOf<String>()
+        var total = 0
+        var enabled = 0
+        var wrong = 0
+        readableDatabase.rawQuery(
+            "SELECT questions.bank,questions.subject,questions.level,questions.enabled," +
+                "CASE WHEN stats.last_correct=0 THEN 1 ELSE 0 END AS wrong " +
+                "FROM questions LEFT JOIN question_stats stats ON questions.id=stats.qid", null
+        ).use { c ->
+            while (c.moveToNext()) {
+                total++
+                (c.getString(0) ?: "").ifBlank { "默认题库" }.let { banks.add(it) }
+                (c.getString(1) ?: "").takeIf { it.isNotBlank() }?.let { subjects.add(it) }
+                (c.getString(2) ?: "").takeIf { it.isNotBlank() }?.let { levels.add(it) }
+                if (c.getInt(3) != 0) enabled++
+                if (c.getInt(4) == 1) wrong++
+            }
+        }
+        return JSONObject()
+            .put("banks", JSONArray(banks.toList()))
+            .put("subjects", JSONArray(subjects.toList()))
+            .put("levels", JSONArray(levels.toList()))
+            .put("total", total).put("enabled", enabled).put("paused", total - enabled).put("wrong", wrong)
+    }
+
     fun countQuestions(): Int = readableDatabase.rawQuery("SELECT COUNT(*) FROM questions WHERE enabled=1", null).use {
         if (it.moveToFirst()) it.getInt(0) else 0
     }
@@ -612,7 +743,7 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
         var covered = 0
         var untouched = 0
         readableDatabase.rawQuery(
-            "SELECT questions.id,questions.stem,questions.subject,questions.level,questions.details," +
+            "SELECT questions.id,questions.stem,questions.subject,questions.level,questions.bank," +
                 "COALESCE(stats.presented,0) AS presented,COALESCE(stats.answered,0) AS answered_count," +
                 "COALESCE(stats.correct,0) AS correct_count " +
                 "FROM questions LEFT JOIN question_stats stats ON questions.id=stats.qid WHERE questions.enabled=1", null
@@ -621,9 +752,7 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
                 val presented = c.getInt(5)
                 val answered = c.getInt(6)
                 val correct = c.getInt(7)
-                val bank = try {
-                    JSONObject(c.getString(4) ?: "{}").optString("bank", "默认题库").ifBlank { "默认题库" }
-                } catch (_: Exception) { "默认题库" }
+                val bank = (c.getString(4) ?: "").ifBlank { "默认题库" }
                 val bucket = banks.getOrPut(bank) { intArrayOf(0, 0) }
                 total++
                 bucket[0]++
@@ -701,6 +830,7 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
             put("level", item.optString("level", "")); put("difficulty", difficulty)
             put("stem", stem); put("options", options.toString()); put("answer", if (type == "text" || type == "subjective") 0 else indices.getInt(0))
             put("tip", item.optString("tip")); put("enabled", 1); put("details", details.toString())
+            put("bank", bank); put("type", type)
         }, SQLiteDatabase.CONFLICT_REPLACE)
         return id
     }
