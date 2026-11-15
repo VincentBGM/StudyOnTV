@@ -2,7 +2,7 @@
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var all = function (selector) { return Array.prototype.slice.call(document.querySelectorAll(selector)); };
-  var state = { screen: '', round: null, config: {}, learning: {}, busy: false, selected: [], version: 0, awaiting: false, reviewed: false, review: null, draft: null };
+  var state = { screen: '', round: null, config: {}, learning: {}, busy: false, selected: [], version: 0, awaiting: false, reviewed: false, review: null, draft: null, unlockPending: false };
   var toastTimer, nextTimer, taps = 0, lastTap = 0, upTaps = 0, lastUpTap = 0;
   // 断电 / 被系统清后台后恢复当前这组题。用 localStorage 而不是 sessionStorage：
   // 进程被杀后 WebView 是新的会话，sessionStorage 活不下来。
@@ -31,6 +31,8 @@
   }
   function canVoice() { return !!(window.SOTVNative && typeof window.SOTVNative.answerVoice === 'function'); }
   function canRead() { return !!(window.SOTVNative && typeof window.SOTVNative.readInLanguage === 'function'); }
+  // 答题 / 锁定页的家长解锁入口（默认关闭，家长在「时间计划」里打开）
+  function canUnlock() { return !!(window.SOTVNative && typeof window.SOTVNative.askParentPassword === 'function' && typeof window.SOTVNative.quizUnlock === 'function'); }
   function nativeCall(name, args) {
     var bridge = window.SOTVNative;
     try { if (bridge && typeof bridge[name] === 'function') return bridge[name].apply(bridge, args || []); } catch (e) {}
@@ -448,6 +450,7 @@
       $('lockDesc').textContent = '家长验证后可临时进入，或返回学习页继续。';
       $('lockNote').textContent = '';
       $('lockActions').innerHTML = '<button class="btn btn-primary focusable" data-action="return-learning">返回学习页</button>';
+      appendUnlockButton();
       focusDefault(); return;
     }
     if (reason === 'locked') {
@@ -457,6 +460,7 @@
       $('lockDesc').textContent = ov.remainingSeconds > 0 ? left2(ov.remainingSeconds) + '后自动恢复' : '需要使用时，请找家长解锁';
       $('lockNote').textContent = '';
       $('lockActions').innerHTML = '';
+      appendUnlockButton();
       focusDefault(); return;
     }
     icon($('lockIcon'), reason === 'schedule' ? 'clock' : 'hourglass');
@@ -480,7 +484,20 @@
     } else {
       $('lockActions').innerHTML = reason === 'timeup' ? '<button class="btn btn-primary focusable" data-action="start-quiz">开始答题</button>' : '';
     }
+    appendUnlockButton();
     focusDefault();
+  }
+  /**
+   * 锁定页的「家长验证解锁」（Issue #201）：家长直接用遥控器输密码临时解锁 30 分钟，
+   * 不必再切到手机面板。只有家长在设置里打开 allowQuizUnlock 才显示，默认关闭。
+   */
+  function appendUnlockButton() {
+    if (!state.config.allowQuizUnlock || !canUnlock()) return;
+    var button = document.createElement('button');
+    button.className = 'btn btn-ghost focusable';
+    button.setAttribute('data-action', 'parent-unlock');
+    button.textContent = '家长验证解锁';
+    $('lockActions').appendChild(button);
   }
   /**
    * 有多个孩子时，先问一句「是谁在学」再开始：每个人的进度、额度、历史都是分开的。
@@ -606,6 +623,13 @@
     if (action === 'type-answer' && !state.busy) nativeCall('answerText', [state.draft ? state.draft.text : '', state.round ? state.round.question.q : '']);
     if (action === 'update-go') { var u = window.currentUpdate; if (u) nativeCall('installUpdate', [u.url, u.latest, u.notes || '']); }
     if (action === 'update-close') { $('updateTip').className = 'update-tip'; try { if (window.currentUpdate) window.localStorage.setItem('sotv_update_dismissed', window.currentUpdate.latest); } catch (e) {} if (el.classList.contains('focused')) focusDefault(); }
+    if (action === 'parent-unlock') {
+      if (!canUnlock()) { toast('当前设备不支持密码解锁'); return; }
+      state.unlockPending = true;
+      // 原生页没打开 / 用户一直没提交时不能让标记一直挂着，否则下一次答题输入会被当成密码
+      window.setTimeout(function () { state.unlockPending = false; }, 180000);
+      nativeCall('askParentPassword');
+    }
     if (action === 'permissions' || action === 'password') nativeCall(action === 'permissions' ? 'openPermissions' : 'changePassword');
     if (action === 'clear-drawing') { state.draft.drawing = ''; renderQuestion(); }
     if (action === 'watch-lesson') nativeCall('watchLesson');
@@ -738,6 +762,25 @@
   window.SOTV_INPUT = function (result, token) {
     // 原生侧靠这个标记确认注入成功，失败会重试（部分电视 WebView 切回来时 JS 尚未就绪）
     if (token) window.__sotvAck = token;
+    // 家长解锁：回传的是密码，不能写进答题草稿
+    if (state.unlockPending) {
+      state.unlockPending = false;
+      var pass = (result && result.text) || '';
+      if (!pass) { toast('已取消解锁'); return; }
+      var reply = null;
+      try { reply = JSON.parse(nativeCall('quizUnlock', [pass]) || 'null'); } catch (e) {}
+      if (reply && reply.ok) {
+        if (reply.status) state.learning = reply.status;
+        state.lockReason = '';
+        toast('已临时解锁 30 分钟');
+        nativeCall('resumePrevious');
+        route();
+        return;
+      }
+      toast(reply && reply.error === 'wrong' ? '密码错误，连续错误 5 次后需等待一分钟' : '解锁失败，请确认家长已在设置里开启');
+      focusDefault();
+      return;
+    }
     if (!state.round) { window._pendingInput = result; return; }
     state.draft = { nonce: state.round.nonce, text: result.text || '', drawing: result.drawing || '' };
     window._pendingInput = null;

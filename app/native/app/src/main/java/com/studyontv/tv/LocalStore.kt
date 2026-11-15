@@ -353,6 +353,8 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
             .put("windowStart", "18:30").put("windowEnd", "20:00").put("allDay", true).put("spacedRepetitionEnabled", false)
             // 覆盖优先：没答对过的题先出，保证题库里的题都会被走到一次（家长面板可关）
             .put("coverageFirst", true)
+            // 新题优先：一次都没出过的题排在前面（#230，默认关）
+            .put("newFirst", false)
             .put("playMode", "round").put("extraEnabled", true).put("shuffleOptions", false).put("showCountdown", true)
             .put("wrongThreshold", 3).put("extraQuestions", 2)
             .put("difficultyRewardEnabled", false)
@@ -367,6 +369,8 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
             // #122：部分固件（海信 VIDAA）会把普通应用的全屏悬浮窗压在硬件视频层下面，
             // 家长可强制改走全屏学习页；默认仍由 GateService 按可见性自动判断。
             .put("forceFullscreenGate", false)
+            // 不计时应用白名单（屏保 / 网课 App）与答题页密码解锁：默认关闭，由家长在面板里打开
+            .put("watchWhitelist", JSONArray()).put("allowQuizUnlock", false)
             .put("learningContent", "quiz").put("educationalVideos", JSONArray()).put("videoMinutes", 1)
             .put("quizBanks", JSONArray())
             .put("quizSubjects", JSONArray()).put("quizLevels", JSONArray())
@@ -523,12 +527,18 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
             }
             next.put("educationalVideos", urls)
         }
+        if (input.has("watchWhitelist")) {
+            val raw = input.optJSONArray("watchWhitelist") ?: throw IllegalArgumentException("白名单格式不正确")
+            val clean = JSONArray()
+            WatchWhitelist.normalize((0 until raw.length()).map { raw.optString(it) }).forEach { clean.put(it) }
+            next.put("watchWhitelist", clean)
+        }
         require(next.optString("learningContent", "quiz") == "quiz" || next.getJSONArray("educationalVideos").length() > 0) { "视频学习模式需要添加视频地址" }
         if (input.has("playMode")) {
             require(input.getString("playMode") in listOf("round", "streak", "practice", "count")) { "未知玩法" }
             next.put("playMode", input.getString("playMode"))
         }
-        listOf("extraEnabled", "coverageFirst", "difficultyRewardEnabled", "allDay", "spacedRepetitionEnabled", "blockSettingsDuringControl", "shuffleOptions", "showCountdown", "dailyLimitEnabled", "roundsLimitEnabled", "restEnabled", "childSelectLevel", "trafficAssistEnabled", "backgroundAnchorEnabled", "forceFullscreenGate", "wrongFirst").forEach {
+        listOf("extraEnabled", "coverageFirst", "newFirst","difficultyRewardEnabled", "allDay", "spacedRepetitionEnabled", "blockSettingsDuringControl", "shuffleOptions", "showCountdown", "dailyLimitEnabled", "roundsLimitEnabled", "restEnabled", "childSelectLevel", "trafficAssistEnabled", "backgroundAnchorEnabled", "forceFullscreenGate", "wrongFirst", "allowQuizUnlock").forEach {
             if (input.has(it)) next.put(it, input.getBoolean(it))
         }
         for (key in listOf("praisePhrases", "encouragePhrases")) if (input.has(key)) {
@@ -587,7 +597,7 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
 
     fun questions(subject: String? = null, level: String? = null, limit: Int = 200, spaced: Boolean = false,
                    enabledOnly: Boolean = true, sortBy: String = "random", wrongFirst: Boolean = false,
-                   coverageFirst: Boolean = false): JSONArray {
+                   coverageFirst: Boolean = false, newFirst: Boolean = false): JSONArray {
         val where = StringBuilder(if (enabledOnly) "enabled=1" else "1=1")
         val args = mutableListOf<String>()
         if (!subject.isNullOrEmpty()) { where.append(" AND subject=?"); args.add(subject) }
@@ -604,14 +614,15 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
         // 覆盖优先：还是一次都没答对的题（correct=0）排在已答对过的题前面，同一档里出题次数少的更靠前，
         // 这样没碰过的题不会被反复出的熟题挤掉，整库都能走到一遍。剩下的顺序仍沿用 $base（随机 / 到期）。
         val coverageTier = "CASE WHEN COALESCE(stats.correct,0)=0 THEN 0 ELSE 1 END, COALESCE(stats.presented,0) ASC"
-        val order = when {
-            // 两个都开时错题优先压过覆盖优先：刚答错的题必须马上回来重练，
-            // 不能被「没出过的题」挡在后面（#136 的行为不能被覆盖优先改掉）
-            coverageFirst && wrongFirst -> "$wrongTier, $coverageTier, $base"
-            coverageFirst -> "$coverageTier, $base"
-            wrongFirst -> "$wrongTier, $base"
-            else -> base
-        }
+        // 新题优先（#230）：一次都没出过的题排在最前面，出过之后就回到正常顺序
+        val newTier = "CASE WHEN COALESCE(stats.presented,0)=0 THEN 0 ELSE 1 END"
+        val tiers = mutableListOf<String>()
+        // 错题优先永远排第一档：刚答错的题必须马上回来重练，
+        // 不能被「没出过的题」挡在后面（#136 的行为不能被覆盖优先 / 新题优先改掉）
+        if (wrongFirst) tiers.add(wrongTier)
+        if (newFirst) tiers.add(newTier)
+        if (coverageFirst) tiers.add(coverageTier)
+        val order = (tiers + base).joinToString(", ")
         return readQuestions(
             "SELECT questions.*,COALESCE(stats.presented,0) AS presented,COALESCE(stats.answered,0) AS answered_count,COALESCE(stats.correct,0) AS correct_count,COALESCE(stats.last_correct,-1) AS last_correct FROM $source WHERE $where ORDER BY $order LIMIT ${limit.coerceIn(1, 50000)}",
             (joinArgs + args).toTypedArray()

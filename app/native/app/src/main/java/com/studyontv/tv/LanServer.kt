@@ -1,6 +1,7 @@
 package com.studyontv.tv
 
 import android.content.Context
+import android.content.Intent
 import android.content.res.AssetManager
 import org.json.JSONArray
 import org.json.JSONObject
@@ -173,6 +174,24 @@ class LanServer(
                 .put("questions", store.countQuestions())
                 .put("needsToken", true)
                 .put("passwordRequired", true))
+        }
+        // 不计时白名单：列出设备上可启动的应用（名称 + 包名），家长面板用来挑选。
+        // Android 11+ 需要 AndroidManifest 里的 <queries> 声明才能看到其他应用。
+        router.get("/api/apps") { ctx ->
+            val pm = context.packageManager
+            val main = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            val seen = HashSet<String>()
+            val items = pm.queryIntentActivities(main, 0).asSequence()
+                .mapNotNull { info ->
+                    val pkg = info.activityInfo?.packageName ?: return@mapNotNull null
+                    if (pkg == context.packageName || !seen.add(pkg)) return@mapNotNull null
+                    pkg to info.loadLabel(pm).toString().trim().take(60)
+                }
+                .sortedBy { it.second }
+                .take(500)
+                .map { (pkg, label) -> JSONObject().put("package", pkg).put("name", label.ifEmpty { pkg }) }
+                .toList()
+            json(ctx.out, 200, JSONObject().put("items", JSONArray(items)))
         }
         router.get("/api/state") { ctx ->
             DeviceRuntime.learning.flushUsage()

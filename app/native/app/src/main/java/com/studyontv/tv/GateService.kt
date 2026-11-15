@@ -48,6 +48,11 @@ class GateService : Service() {
     @Volatile private var foregroundPackage: String? = null
     @Volatile private var ownActivityForeground = false
     @Volatile private var monitoringNow = false
+    /** 本轮 tick 读到的「不计时应用」白名单（屏保 / 网课 App） */
+    private var whitelistNow: Set<String> = emptySet()
+    /** 观看计时心跳：上次写盘的开机时刻，以及上次写的是不是「正在计时」（#148） */
+    private var lastBeatAt = 0L
+    private var beatCounting = false
     /**
      * 屏幕是否亮着。TCL 电视「关机」（未断电）后 PowerManager 仍报 interactive，
      * 计时会照走；系统广播和显示状态任一说熄灭就按熄灭处理。
@@ -104,6 +109,9 @@ class GateService : Service() {
         foregroundPackage = pkg
         ownActivityForeground = ownForeground
         monitoringNow = monitoring
+        // 不计时白名单：系统屏保、网课 App 在前台时既不扣时长，也不弹题 / 静音。
+        whitelistNow = WatchWhitelist.of(DeviceRuntime.store.config())
+        val whitelistedNow = pkg != null && whitelistNow.contains(pkg)
         // 记住孩子正在用的应用，解锁后用它「回到原画面」（issue #68 / #74）
         if (pkg != null && pkg != packageName && !exempt(pkg, false)) rememberActive(pkg)
         // With only overlay permission, use awake time outside our own activities.
@@ -112,13 +120,13 @@ class GateService : Service() {
         // #93 / #17：识别不到前台应用（pkg == null）时一律按亮屏时间计时。以前只有
         // 「仅有悬浮窗权限」才这样兜底，有使用情况 / 无障碍权限却拿到 null 时会静默停止计时，
         // 表现就是「显示还有 10 分钟却永远不减少、到点也不弹」。孩子在学习页时走 ownForeground。
-        val active = awake && monitoring && !ownForeground && when {
+        val active = awake && monitoring && !ownForeground && !whitelistedNow && when {
             pkg == null -> true
             !exempt(pkg) -> true
             else -> launcherPlaying(pkg) || (pkg != packageName && (pkg == launcherPackage() || Foreground.isTransient(pkg)) &&
                 DeviceRuntime.store.config().optBoolean("trafficAssistEnabled") && PlaybackTraffic.playing(this))
         }
-        val protecting = awake && monitoring && !ownForeground && (pkg == null || !exempt(pkg, false))
+        val protecting = awake && monitoring && !ownForeground && !whitelistedNow && (pkg == null || !exempt(pkg, false))
         val reason = status.getString("reason")
         val settingsBlocked = SystemSettingsGuard.blocked(this, awake, monitoring, free, pkg,
             DeviceRuntime.store.config().optBoolean("blockSettingsDuringControl", true), AdminAuth.recentlyVerified())
@@ -126,10 +134,11 @@ class GateService : Service() {
         val pendingFeedback = DeviceRuntime.store.get("review_feedback").isNotEmpty()
         val practice = DeviceRuntime.store.config().optString("playMode") == "practice"
         // 一次 tick 内统一口径：什么情况下应该有 Gate（静音与弹窗共用这个判断）
-        gateExpectedNow = !free && (gateReason.isNotEmpty() || pendingFeedback || practice)
+        gateExpectedNow = !free && !whitelistedNow && (gateReason.isNotEmpty() || pendingFeedback || practice)
         val feedbackVisible = !free && hasGate() && pendingFeedback
         AudioController.syncLearningActivity(free, gateExpectedNow)
         wasUsing = active && !free && reason.isEmpty() && !feedbackVisible
+        beatWatch(wasUsing)
         if (!awake || !monitoring || (!settingsBlocked && (ownForeground || (reason.isEmpty() && !feedbackVisible) || (pkg != null && exempt(pkg, false))))) hideAll()
         val snapshot = "reason=$gateReason free=$free awake=$awake screen=$screenOn monitoring=$monitoring own=$ownForeground pkg=$pkg cls=${pkg?.let { Foreground.currentClass(it) }} active=$active gate=${hasGate()} overlay=$canOverlay mute=${MediaPause.active} failures=$gateFailures"
         if (snapshot != lastDiag) { lastDiag = snapshot; Diag.info("Gate", snapshot) }
@@ -140,6 +149,36 @@ class GateService : Service() {
         // 否则出现「视频被静音了，却没人来答题」。
         if (MediaPause.active && !muteBackedByVisibleGate()) releaseMuteWithoutGate("foreground")
         updateCountdown(status, state)
+    }
+
+    /**
+     * 观看计时心跳（#148）。进程被固件强杀时 onDestroy 不会执行，只能靠最后一次心跳估算漏掉的时长，
+     * 所以计时中每 5 秒同步落盘一次；停止计时时立刻写一次 inactive，避免关机待机被补扣。
+     */
+    private fun beatWatch(counting: Boolean) {
+        val now = SystemClock.elapsedRealtime()
+        if (!WatchGap.beatDue(lastBeatAt, now, counting, alreadyInactive = !beatCounting && lastBeatAt > 0)) return
+        lastBeatAt = now
+        beatCounting = counting
+        Prefs.setWatchBeat(this, Prefs.WatchBeat(counting, System.currentTimeMillis(), now, SystemClock.uptimeMillis()))
+    }
+
+    /**
+     * 上次进程没走正常退出时，把被杀期间醒着的时间补扣回来（#148）。
+     * 只在屏幕亮着、且空档在 [WatchGap] 的保守范围内才补；补完立即清掉心跳，防止重复补算。
+     */
+    private fun recoverWatchGap() {
+        val beat = Prefs.watchBeat(this) ?: return
+        Prefs.clearWatchBeat(this)
+        lastBeatAt = 0L
+        beatCounting = false
+        if (!beat.active) return
+        val power = getSystemService(POWER_SERVICE) as PowerManager
+        if (!power.isInteractive) return
+        val gap = WatchGap.recoverMs(beat.elapsed, beat.uptime, SystemClock.elapsedRealtime(), SystemClock.uptimeMillis())
+        if (gap <= 0L) return
+        DeviceRuntime.learning.consumeRecovered(gap)
+        Diag.warn("Gate", "进程被杀期间补算观看时长 ${gap / 1000} 秒（上次心跳 ${(System.currentTimeMillis() - beat.at) / 1000} 秒前）")
     }
 
     /**
@@ -524,6 +563,8 @@ class GateService : Service() {
         if (pkg == packageName || pkg == "com.android.systemui" || pkg == "android" || pkg.contains("packageinstaller")) return true
         if (pkg.contains("permissioncontroller") || pkg.contains("inputmethod") || pkg.contains("keyboard")) return true
         if (SystemSettingsGuard.isSettings(this, pkg) || pkg in setOf("com.google.android.dialer", "com.android.dialer", "com.android.phone", "com.android.server.telecom", "com.android.emergency")) return true
+        // 家长指定不计时的应用（屏保 / 网课）：不扣时长、不弹题，也不静音
+        if (pkg in whitelistNow) return true
         if (!includeLauncher) return false
         val launcher = packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0)?.activityInfo?.packageName
         return pkg == launcher || Foreground.isLauncher(pkg)
@@ -561,6 +602,8 @@ class GateService : Service() {
         Watchdog.serviceStarted(this, startVia)
         Watchdog.schedule(this)
         Watchdog.scheduleAlarm(this)
+        // 上一次进程是被固件直接杀掉的：先把死掉期间的观看时长补回来，再开始正常 tick
+        recoverWatchGap()
         handler.post(tick)
         handler.postDelayed(mediaTick, 1000)
     }
@@ -583,7 +626,9 @@ class GateService : Service() {
         overlay.destroy(); WatchAccessibilityService.hideGate(); countdown.destroy(); updateAnchor(false)
         instance = null
         Prefs.setServiceRunning(this, false)
-        Diag.info("Service", "GateService destroyed")
+        // 正常退出：清掉心跳，下次启动不会把停机期间当成观看时间补扣
+        Prefs.clearWatchBeat(this)
+        Diag.warn("Service", "GateService destroyed at uptime=${SystemClock.uptimeMillis() / 1000}s")
         super.onDestroy()
     }
 

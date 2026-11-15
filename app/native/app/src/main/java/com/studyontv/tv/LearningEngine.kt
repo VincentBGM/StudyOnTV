@@ -393,6 +393,21 @@ class LearningEngine(private val store: LocalStore) {
         } finally { db.endTransaction() }
     }
 
+    /**
+     * 进程被杀期间漏掉的时间（#148）：分块走与正常 tick 相同的扣减逻辑。
+     *
+     * [consume] 单次上限 5 秒，是为了防止休眠唤醒后一次性扣掉整晚；补算同样不能放宽这条保护，
+     * 所以这里按 5 秒一块循环。补算区间由 [WatchGap] 用开机时钟收窄，不含深睡时间。
+     */
+    @Synchronized
+    fun consumeRecovered(milliseconds: Long) {
+        var left = milliseconds.coerceAtLeast(0)
+        while (left > 0) {
+            consume(minOf(left, 5000L))
+            left -= 5000L
+        }
+    }
+
     @Synchronized
     fun flushUsage() {
         if (pendingUsageMs <= 0) return
@@ -479,8 +494,10 @@ class LearningEngine(private val store: LocalStore) {
         val wrongFirst = config.optBoolean("wrongFirst")
         // 覆盖优先：排序交给 SQL（同档内仍按随机 / 到期），这里只是把开关传下去
         val coverageFirst = config.optBoolean("coverageFirst")
+        // 新题优先（#230）：没出过的题排在前面，排序同样交给 SQL
+        val newFirst = config.optBoolean("newFirst")
         val all = store.questions(limit = 50000, spaced = config.optBoolean("spacedRepetitionEnabled"),
-            wrongFirst = wrongFirst, coverageFirst = coverageFirst)
+            wrongFirst = wrongFirst, coverageFirst = coverageFirst, newFirst = newFirst)
         val bank = JSONArray()
         for (i in 0 until all.length()) {
             val item = all.getJSONObject(i)

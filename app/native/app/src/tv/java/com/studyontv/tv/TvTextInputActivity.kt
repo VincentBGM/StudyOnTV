@@ -31,6 +31,8 @@ class TvTextInputActivity : Activity() {
     private var delivered = false
     private var cancelled = false
     private val requestId get() = intent.getStringExtra("requestId") ?: ""
+    /** 家长密码模式（#201）：单行掩码输入，不提供语音 / 多行答案 */
+    private val passwordMode get() = intent.getBooleanExtra("passwordMode", false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -41,17 +43,22 @@ class TvTextInputActivity : Activity() {
             setBackgroundColor(TvUi.background(this@TvTextInputActivity))
             setPadding((64 * dp).toInt(), (36 * dp).toInt(), (64 * dp).toInt(), (24 * dp).toInt())
         }
-        root.addView(TextView(this).apply { text = "填写答案"; textSize = 26f; setTextColor(TvUi.foreground(this@TvTextInputActivity)) })
+        root.addView(TextView(this).apply {
+            text = if (passwordMode) "家长验证" else "填写答案"
+            textSize = 26f; setTextColor(TvUi.foreground(this@TvTextInputActivity))
+        })
         val prompt = intent.getStringExtra("prompt").orEmpty()
         if (prompt.isNotBlank()) root.addView(TextView(this).apply {
             text = prompt.take(200); textSize = 16f; setTextColor(TvUi.muted(this@TvTextInputActivity)); maxLines = 3
             setPadding(0, (8 * dp).toInt(), 0, (12 * dp).toInt())
         }, LinearLayout.LayoutParams(-1, -2))
         edit = EditText(this).apply {
-            hint = "用遥控器或语音输入，完成后选择“确定”"
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            hint = if (passwordMode) "输入家长管理密码" else "用遥控器或语音输入，完成后选择“确定”"
+            inputType = if (passwordMode) InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                else InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
             imeOptions = EditorInfo.IME_ACTION_DONE or EditorInfo.IME_FLAG_NO_EXTRACT_UI
-            minLines = 2; maxLines = 5; gravity = Gravity.TOP or Gravity.START
+            minLines = if (passwordMode) 1 else 2; maxLines = if (passwordMode) 1 else 5
+            gravity = Gravity.TOP or Gravity.START
             TvUi.field(this)
             setText(savedInstanceState?.getString("draft") ?: intent.getStringExtra("draft").orEmpty())
             setSelection(text.length)
@@ -64,21 +71,21 @@ class TvTextInputActivity : Activity() {
                 row.addView(button, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = (8 * dp).toInt(); rightMargin = (8 * dp).toInt() })
             }
         add("确定", true) { finishWith(true) }
-        voiceButton = add("语音输入 / 重录") { voice() }
+        if (!passwordMode) voiceButton = add("语音输入 / 重录") { voice() }
         add("清空") { edit.setText("") }
         add("取消") { finishWith(false) }
         root.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = (20 * dp).toInt() })
         setContentView(root)
         edit.requestFocus()
         edit.post {
-            if (intent.getBooleanExtra("voice", false) && savedInstanceState == null) voice()
+            if (!passwordMode && intent.getBooleanExtra("voice", false) && savedInstanceState == null) voice()
             else (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(edit, InputMethodManager.SHOW_IMPLICIT)
         }
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        // 遥控器的语音键 / 搜索键直接进入语音输入
-        if (event.action == KeyEvent.ACTION_DOWN && (event.keyCode == KeyEvent.KEYCODE_SEARCH || event.keyCode == KeyEvent.KEYCODE_VOICE_ASSIST)) { voice(); return true }
+        // 遥控器的语音键 / 搜索键直接进入语音输入（密码模式不录音）
+        if (!passwordMode && event.action == KeyEvent.ACTION_DOWN && (event.keyCode == KeyEvent.KEYCODE_SEARCH || event.keyCode == KeyEvent.KEYCODE_VOICE_ASSIST)) { voice(); return true }
         return super.dispatchKeyEvent(event)
     }
 
@@ -87,6 +94,7 @@ class TvTextInputActivity : Activity() {
      * 没填还是走系统识别器。录着的时候再按一次就停止并开始识别。
      */
     private fun voice() {
+        if (passwordMode) return
         val key = try { SpeechReader.recognizeKey(DeviceRuntime.store) } catch (_: Exception) { "" }
         if (key.isEmpty()) { systemVoice(); return }
         if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -159,8 +167,12 @@ class TvTextInputActivity : Activity() {
         capture?.cancel(); capture = null
         // 遥控器「返回键」退出时不算取消：把已输入的内容带回去，避免辛苦打的字白打（#64）
         if (!delivered && !isChangingConfigurations) {
-            val draft = if (::edit.isInitialized) edit.text.toString() else ""
-            AnswerInput.complete(requestId, if (draft.isNotBlank()) JSONObject().put("text", draft) else null)
+            // 密码模式按返回键 = 取消，不能把半截密码当成解锁尝试提交
+            if (passwordMode) AnswerInput.complete(requestId, null)
+            else {
+                val draft = if (::edit.isInitialized) edit.text.toString() else ""
+                AnswerInput.complete(requestId, if (draft.isNotBlank()) JSONObject().put("text", draft) else null)
+            }
         }
         super.onDestroy()
     }
