@@ -12,7 +12,7 @@ jobs:
     permissions:
       contents: write  # 需要写权限：上传 Release 资产 + commit update.json
     env:
-      # secrets 不能直接写在 step 的 if 里（只能读 env），先提到 job 级
+      # step 的 if 只能用 env 判断，不能直接引用 secrets（否则整个工作流校验不过）
       PGYER_API_KEY: ${{ secrets.PGYER_API_KEY }}
 
     steps:
@@ -113,9 +113,7 @@ jobs:
 
       # ── 8. 上传到蒲公英（备用下载）────────────────────────────────────
       - name: 上传 Mobile APK 到蒲公英
-        if: ${{ secrets.PGYER_API_KEY != '' }}
-        env:
-          PGYER_API_KEY: ${{ secrets.PGYER_API_KEY }}
+        if: env.PGYER_API_KEY != ''
         run: |
           NOTES=$(git tag -l --format='%(contents:body)' "$TAG" 2>/dev/null || echo "")
           curl -s --fail-with-body \
@@ -126,9 +124,7 @@ jobs:
           cat pgyer-mobile.json | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if d.get('code')==0 else 1)"
 
       - name: 上传 TV APK 到蒲公英
-        if: ${{ secrets.PGYER_API_KEY != '' }}
-        env:
-          PGYER_API_KEY: ${{ secrets.PGYER_API_KEY }}
+        if: env.PGYER_API_KEY != ''
         run: |
           NOTES=$(git tag -l --format='%(contents:body)' "$TAG" 2>/dev/null || echo "")
           curl -s --fail-with-body \
