@@ -162,6 +162,6 @@ open class MainActivity : Activity() {
     companion object {
         /** 电源 / 休眠 / 待机键：任何页面都不能拦截，否则电视关不了机（#143） */
         fun isPowerKey(code: Int): Boolean = code == KeyEvent.KEYCODE_POWER || code == KeyEvent.KEYCODE_SLEEP ||
-            code == KeyEvent.KEYCODE_SOFT_SLEEP || code == KeyEvent.KEYCODE_STANDBY
+            code == KeyEvent.KEYCODE_SOFT_SLEEP
     }
 }
