@@ -2,19 +2,19 @@
   "version": "0.4.1",
   "versionCode": 43,
   "force": false,
-  "notes": "step 的 if 里不能直接引用 secrets 上下文，GitHub 会判定整个工作流无效，\n之后每次推送只留下一条 0 秒失败记录，一个作业都不会启动。\n\n改为在 job 级声明 PGYER_API_KEY: ${{ secrets.PGYER_API_KEY }}，\n两个上传步骤用 if: env.PGYER_API_KEY != '' 判断，curl 里用 ${PGYER_API_KEY}。\n没有该 secret 时仍然跳过上传。",
-  "publishedAt": "2026-11-15T16:51:35.888Z",
+  "notes": "上传接口要的是 _api_key，写 apiKey 会被当成没传密钥，\n返回 {\"code\":1001,\"message\":\"_api_key could not be empty\"}。",
+  "publishedAt": "2026-11-15T16:55:46.547Z",
   "assets": {
     "tv": {
       "name": "StudyOnTV-Android-TV-v0.4.1.apk",
       "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.4.1/StudyOnTV-Android-TV-v0.4.1.apk",
-      "sha256": "bb3fb2ce38eed511cbd0283dd2ce92cb119bbdcfdb02d0da39adf54a5895e7aa",
+      "sha256": "61a7e2231735dd6b3698e96f849444f6eff05b25ab6bf0e8261ac33e674872dc",
       "size": 3454024
     },
     "mobile": {
       "name": "StudyOnTV-Mobile-v0.4.1.apk",
       "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.4.1/StudyOnTV-Mobile-v0.4.1.apk",
-      "sha256": "f1d65bf2fcd28e590e0b19dd0e727ffd527e4ee0d24e9343e74ea6fe7d21f7a3",
+      "sha256": "d1268ea121eb3138370fec09202cdcdf8a240f2a5aa786d2b5ae5c3a9e8d4bf6",
       "size": 3456085
     }
   }
