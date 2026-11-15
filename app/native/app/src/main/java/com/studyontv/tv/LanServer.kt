@@ -311,7 +311,7 @@ class LanServer(
         // #128 本地语音诊断：引擎列表只查 PackageManager；探测会阻塞最多 3 秒（路由本来就跑在 worker 线程）
         router.get("/api/speech/engines") { ctx ->
             json(ctx.out, 200, JSONObject().put("engines", TtsProbe.installedEngines(context))
-                .put("defaultEngine", TtsProbe.defaultEngine()))
+                .put("defaultEngine", TtsProbe.defaultEngine(context)))
         }
         router.get("/api/speech/probe") { ctx ->
             json(ctx.out, 200, TtsProbe.probe(context, ctx.query["language"].orEmpty().ifBlank { "zh-CN" }))
