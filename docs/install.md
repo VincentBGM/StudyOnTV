@@ -115,6 +115,8 @@ adb shell monkey -p com.studyontv.tv -c android.intent.category.LAUNCHER 1
 
 本应用是普通应用，没有权限替电视改网络配置，所以这一步只能按上表在路由器或电视系统设置里做一次。
 
+**不在同一个网络时**（比如人在公司）：面板默认只对局域网开放，需要额外用 Tailscale、Lucky 或 frp 接出去，做法见 [远程管理电视](./remote-access.md)。
+
 ---
 
 ## 按需开启权限
