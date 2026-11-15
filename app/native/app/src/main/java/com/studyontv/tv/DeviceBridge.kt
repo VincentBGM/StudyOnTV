@@ -99,6 +99,12 @@ open class DeviceBridge(protected val activity: Activity, private val connection
     } catch (_: Throwable) { false }
 
     @JavascriptInterface
+    fun navigationBlocked(): Boolean {
+        LearningNavigation.notifyBlocked(activity)
+        return true
+    }
+
+    @JavascriptInterface
     fun exitToLauncher() {
         val status = DeviceRuntime.learning.status()
         if (!status.optBoolean("canExit")) return

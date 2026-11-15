@@ -35,7 +35,7 @@ class RegressionInstrumentation : Instrumentation() {
             try {
                 val output = if (homeUi) HomeNavigationUiRegression.run(this) else {
                     HomeNavigationRegression.run(targetContext)
-                    "PASS: Home sequences, navigation snapshots, config/credit/child/answer publication and expiry\n"
+                    "PASS: Home/App Switch sequences, changed-downTime chords with Back/DPAD/volume and recovery, navigation snapshots, config/credit/child/answer publication and expiry\n"
                 }
                 results.putString("stream", output)
                 finish(Activity.RESULT_OK, results)

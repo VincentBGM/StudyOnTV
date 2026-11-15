@@ -22,7 +22,7 @@ object HomeNavigationRegression {
 
         var blocked = true
         var decisions = 0
-        val keys = HomeKeyFilter { decisions++; blocked }
+        val keys = NavigationKeyFilter { decisions++; blocked }
         fun key(action: Int, time: Long, repeat: Int = 0, device: Int = 1, code: Int = KeyEvent.KEYCODE_HOME) =
             KeyEvent(time, time + repeat + 1, action, code, repeat, 0, device, 0)
         check(keys.handle(key(KeyEvent.ACTION_DOWN, 1)))
@@ -52,6 +52,70 @@ object HomeNavigationRegression {
         check(keys.handle(key(KeyEvent.ACTION_DOWN, 8)))
         keys.reset()
         check(!keys.handle(key(KeyEvent.ACTION_UP, 8)))
+
+        for (code in listOf(KeyEvent.KEYCODE_HOME, KeyEvent.KEYCODE_APP_SWITCH)) {
+            blocked = true
+            check(keys.handle(key(KeyEvent.ACTION_DOWN, 9, code = code)))
+            blocked = false
+            check(keys.handle(key(KeyEvent.ACTION_DOWN, 9, 1, code = code)))
+            check(keys.handle(key(KeyEvent.ACTION_UP, 9, code = code)))
+            check(!keys.handle(key(KeyEvent.ACTION_DOWN, 10, code = code)))
+            blocked = true
+            check(!keys.handle(key(KeyEvent.ACTION_DOWN, 10, 1, code = code)))
+            check(!keys.handle(key(KeyEvent.ACTION_UP, 10, code = code)))
+            check(!keys.handle(key(KeyEvent.ACTION_UP, 11, code = code)))
+            check(!keys.handle(key(KeyEvent.ACTION_DOWN, 12, 1, code = code)))
+            check(!keys.handle(key(KeyEvent.ACTION_UP, 12, code = code)))
+            check(keys.handle(key(KeyEvent.ACTION_DOWN, 13, code = code)))
+            keys.reset()
+            check(!keys.handle(key(KeyEvent.ACTION_UP, 13, code = code)))
+
+            // Same device and downTime: each key must retain its own policy until released.
+            val otherCode = if (code == KeyEvent.KEYCODE_HOME) KeyEvent.KEYCODE_APP_SWITCH else KeyEvent.KEYCODE_HOME
+            val beforeOverlap = decisions
+            check(keys.handle(key(KeyEvent.ACTION_DOWN, 14, code = code)))
+            blocked = false
+            check(!keys.handle(key(KeyEvent.ACTION_DOWN, 14, code = otherCode)))
+            check(decisions == beforeOverlap + 2)
+            check(keys.handle(key(KeyEvent.ACTION_DOWN, 14, 1, code = code)))
+            check(!keys.handle(key(KeyEvent.ACTION_DOWN, 14, 1, code = otherCode)))
+            check(!keys.handle(key(KeyEvent.ACTION_UP, 14, code = otherCode)))
+            check(keys.handle(key(KeyEvent.ACTION_UP, 14, code = code)))
+        }
+
+        fun chord(action: Int, code: Int, downTime: Long, eventTime: Long, repeat: Int = 0) =
+            KeyEvent(downTime, eventTime, action, code, repeat, 0, 1, 0)
+        val navigationCodes = listOf(KeyEvent.KEYCODE_HOME, KeyEvent.KEYCODE_APP_SWITCH)
+        for (code in navigationCodes) {
+            for (other in navigationCodes + listOf(KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_VOLUME_UP)) {
+                if (other == code) continue
+                for (initialBlock in listOf(true, false)) for (releaseFirst in listOf(true, false)) {
+                    keys.reset()
+                    blocked = initialBlock
+                    check(keys.handle(chord(KeyEvent.ACTION_DOWN, code, 100, 100)) == initialBlock)
+                    blocked = !initialBlock
+                    val otherBlock = other in navigationCodes && blocked
+                    check(keys.handle(chord(KeyEvent.ACTION_DOWN, other, 200, 200)) == otherBlock)
+                    val beforeRepeat = decisions
+                    check(keys.handle(chord(KeyEvent.ACTION_DOWN, code, 200, 250, 1)) == initialBlock)
+                    check(decisions == beforeRepeat) { "A repeat with changed downTime must retain its decision" }
+                    if (releaseFirst) {
+                        check(keys.handle(chord(KeyEvent.ACTION_UP, code, 200, 300)) == initialBlock)
+                        check(keys.handle(chord(KeyEvent.ACTION_UP, other, 200, 350)) == otherBlock)
+                    } else {
+                        check(keys.handle(chord(KeyEvent.ACTION_UP, other, 200, 300)) == otherBlock)
+                        check(keys.handle(chord(KeyEvent.ACTION_UP, code, 200, 350)) == initialBlock)
+                    }
+                    check(!keys.handle(chord(KeyEvent.ACTION_UP, code, 200, 400)))
+                }
+            }
+            // If a device loses UP, a fresh DOWN must replace the stale decision.
+            blocked = true
+            check(keys.handle(chord(KeyEvent.ACTION_DOWN, code, 500, 500)))
+            blocked = false
+            check(!keys.handle(chord(KeyEvent.ACTION_DOWN, code, 600, 600)))
+            check(!keys.handle(chord(KeyEvent.ACTION_UP, code, 600, 650)))
+        }
 
         val database = "home-navigation-regression.db"
         context.deleteDatabase(database)

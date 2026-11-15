@@ -8,12 +8,17 @@ import android.view.accessibility.AccessibilityEvent
 
 class WatchAccessibilityService : AccessibilityService() {
     private var gate: GateOverlay? = null
-    private val homeKeys = HomeKeyFilter { LearningNavigation.shouldBlockHome() }
+    private val navigationKeys = NavigationKeyFilter { LearningNavigation.shouldBlockHome() }
 
     public override fun onKeyEvent(event: KeyEvent): Boolean {
-        val consumed = homeKeys.handle(event)
-        if (consumed && event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0)
-            blockedHomePresses++
+        val consumed = navigationKeys.handle(event)
+        if (consumed && event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_HOME -> blockedHomePresses++
+                KeyEvent.KEYCODE_APP_SWITCH -> blockedAppSwitchPresses++
+            }
+            LearningNavigation.notifyBlocked(DeviceRuntime.appContext)
+        }
         return consumed
     }
 
@@ -39,7 +44,7 @@ class WatchAccessibilityService : AccessibilityService() {
      * 留下一条记录，#120 这类「无障碍自己关闭」才能分清是解绑还是进程被杀（进程被杀不会走到任何回调）。
      */
     override fun onUnbind(intent: android.content.Intent?): Boolean {
-        homeKeys.reset()
+        navigationKeys.reset()
         Diag.warn("A11y", "service unbound action=${intent?.action}")
         return super.onUnbind(intent)
     }
@@ -53,7 +58,7 @@ class WatchAccessibilityService : AccessibilityService() {
         GateService.ensureRunning(this, "accessibility")
     }
     override fun onDestroy() {
-        homeKeys.reset()
+        navigationKeys.reset()
         Diag.info("A11y", "service destroyed connected=$connected")
         gate?.destroy(); gate = null
         instance = null
@@ -65,6 +70,8 @@ class WatchAccessibilityService : AccessibilityService() {
     companion object {
         @Volatile var blockedHomePresses = 0L
             private set
+        @Volatile var blockedAppSwitchPresses = 0L
+            private set
         private var instance: WatchAccessibilityService? = null
         var connected = false
             private set
@@ -75,6 +82,7 @@ class WatchAccessibilityService : AccessibilityService() {
         } catch (_: Exception) { false }
         fun hasGate(): Boolean = instance?.gate?.isShowing == true
         fun presentedGate(): Boolean = instance?.gate?.presenting() == true
+        fun showNavigationBlocked(): Boolean = instance?.gate?.showNavigationBlocked() == true
         fun keyFilterRequested(): Boolean = connected && ((instance?.serviceInfo?.flags ?: 0) and
             android.accessibilityservice.AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS) != 0
         fun showGate(reason: String): Boolean = instance?.gate?.show(reason) == true

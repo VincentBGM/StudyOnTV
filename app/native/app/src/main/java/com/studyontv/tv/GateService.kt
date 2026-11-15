@@ -671,6 +671,7 @@ class GateService : Service() {
         }
         fun hasGate(): Boolean = WatchAccessibilityService.hasGate() || instance?.overlay?.isShowing == true
         fun presentedOverlay(): Boolean = instance?.overlay?.presenting() == true
+        fun showNavigationBlocked(): Boolean = instance?.overlay?.showNavigationBlocked() == true
         /** 家长面板里的能力自检；不依赖服务是否在运行 */
         fun diagnostics(context: Context): org.json.JSONObject {
             val service = instance
@@ -690,6 +691,7 @@ class GateService : Service() {
             return org.json.JSONObject()
                 .put("service", running)
                 .put("homeBlockedPresses", WatchAccessibilityService.blockedHomePresses)
+                .put("appSwitchBlockedPresses", WatchAccessibilityService.blockedAppSwitchPresses)
                 .put("homePolicyExitAllowed", LearningNavigation.snapshot?.canExit ?: false)
                 .put("homePolicyFresh", LearningNavigation.snapshot?.let { now - it.publishedAt <= 2000 } ?: false)
                 .put("homeBlocking", LearningNavigation.shouldBlockHome())
