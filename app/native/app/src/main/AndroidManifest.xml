@@ -8,6 +8,16 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
+    <!-- 同步自愈：adb 一次性授权（pm grant com.studyontv.tv android.permission.WRITE_SECURE_SETTINGS），
+         授权后 App 被固件摘掉无障碍时能自己写回去；未授权时 heal() 静默跳过 -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
+    <!-- 复活账户：addAccountExplicitly 在旧版本需要这条（安装时权限，无需用户确认） -->
+    <uses-permission android:name="android.permission.AUTHENTICATE_ACCOUNTS" />
+    <!-- 同步框架自愈：缺 READ/WRITE_SYNC_SETTINGS 时 setSyncAutomatically/addPeriodicSync 会抛
+         SecurityException，同步适配器永远不启用（安装时权限，必须声明） -->
+    <uses-permission android:name="android.permission.READ_SYNC_SETTINGS" />
+    <uses-permission android:name="android.permission.WRITE_SYNC_SETTINGS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -123,6 +133,32 @@
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
+        </service>
+
+        <!-- 同步框架自愈（GuardSync.kt）：settings authority 上的本地同步。
+             固件强停时「把自己从无障碍列表里摘掉」本身是 settings 写入，会触发 LOCAL 同步，
+             系统随之显式 bind 拉起进程；周期同步则在 stopped 状态下兜底并清除 stopped 标记。 -->
+        <service
+            android:name=".GuardAccountService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accounts.AccountAuthenticator" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accounts.AccountAuthenticator"
+                android:resource="@xml/guard_account" />
+        </service>
+
+        <service
+            android:name=".GuardSyncService"
+            android:exported="true"
+            android:permission="android.permission.BIND_SYNC_ADAPTER">
+            <intent-filter>
+                <action android:name="android.content.SyncAdapter" />
+            </intent-filter>
+            <meta-data
+                android:name="android.content.SyncAdapter"
+                android:resource="@xml/guard_sync" />
         </service>
 
         <!-- 系统 PackageInstaller 的安装结果回到这里，失败原因写进诊断日志和家长面板 -->
