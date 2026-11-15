@@ -117,7 +117,7 @@ jobs:
         run: |
           NOTES=$(git tag -l --format='%(contents:body)' "$TAG" 2>/dev/null || echo "")
           curl -s --fail-with-body \
-            -F "apiKey=${PGYER_API_KEY}" \
+            -F "_api_key=${PGYER_API_KEY}" \
             -F "file=@release-artifacts/StudyOnTV-Mobile-${TAG}.apk" \
             -F "buildUpdateDescription=${NOTES}" \
             "https://www.pgyer.com/apiv2/app/upload" | tee pgyer-mobile.json
@@ -128,7 +128,7 @@ jobs:
         run: |
           NOTES=$(git tag -l --format='%(contents:body)' "$TAG" 2>/dev/null || echo "")
           curl -s --fail-with-body \
-            -F "apiKey=${PGYER_API_KEY}" \
+            -F "_api_key=${PGYER_API_KEY}" \
             -F "file=@release-artifacts/StudyOnTV-Android-TV-${TAG}.apk" \
             -F "buildUpdateDescription=${NOTES}" \
             "https://www.pgyer.com/apiv2/app/upload" | tee pgyer-tv.json
