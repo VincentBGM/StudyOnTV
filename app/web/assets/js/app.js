@@ -792,7 +792,8 @@
     try { if (!info.force && window.localStorage.getItem('sotv_update_dismissed') === info.latest) return; } catch (e) {} $('updateText').textContent = '发现新版本 v' + info.latest; $('updateTip').className = 'update-tip show'; };
   // 朗读失败（没有系统语音、云端 Key 不对、语言不支持…）直接显示在电视上，不能再「点了没声音」
   window.SOTV_SPEECH_NOTICE = function (info) { if (!info || info.ok !== false) return; toast(String(info.message || '朗读失败，请重试')); };
-  window.TV = { move: move, select: function () { activate(); }, back: function () { if (!state.learning.reason && (state.learning.remainingSeconds > 0 || state.learning.free)) nativeCall('exitToLauncher'); else toast('现在暂不可用'); }, state: state };
+  window.SOTV_NAVIGATION_BLOCKED = function (message) { toast(message || '现在暂不可用'); return true; };
+  window.TV = { move: move, select: function () { activate(); }, back: function () { if (state.learning.canExit === true) nativeCall('exitToLauncher'); else if (nativeCall('navigationBlocked') !== true) window.SOTV_NAVIGATION_BLOCKED(); }, state: state };
   window.SOTV_RESUME = function () { if (document.readyState === 'complete' && !state.busy && state.screen !== 'pair') route(); };
   window.addEventListener('hashchange', route);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();

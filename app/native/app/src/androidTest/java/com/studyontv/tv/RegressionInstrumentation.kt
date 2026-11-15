@@ -13,6 +13,8 @@ class RegressionInstrumentation : Instrumentation() {
     private var children = false
     private var levels = false
     private var launcher = false
+    private var home = false
+    private var homeUi = false
     private var videoUrl = ""
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
@@ -21,12 +23,28 @@ class RegressionInstrumentation : Instrumentation() {
         children = arguments?.getString("children") == "1"
         levels = arguments?.getString("levels") == "1"
         launcher = arguments?.getString("launcher") == "1"
+        home = arguments?.getString("home") == "1"
+        homeUi = arguments?.getString("homeUi") == "1"
         videoUrl = arguments?.getString("url") ?: ""
         start()
     }
 
     override fun onStart() {
         val results = Bundle()
+        if (home || homeUi) {
+            try {
+                val output = if (homeUi) HomeNavigationUiRegression.run(this) else {
+                    HomeNavigationRegression.run(targetContext)
+                    "PASS: Home/App Switch sequences, changed-downTime chords with Back/DPAD/volume and recovery, navigation snapshots, config/credit/child/answer publication and expiry\n"
+                }
+                results.putString("stream", output)
+                finish(Activity.RESULT_OK, results)
+            } catch (e: Throwable) {
+                results.putString("stream", android.util.Log.getStackTraceString(e))
+                finish(Activity.RESULT_CANCELED, results)
+            }
+            return
+        }
         if (levels) {
             FeatureRegression.levelSelection(targetContext)
             results.putString("stream", "PASS: 年级选择（唯一年级自动开始、多年级选择、范围筛选、暂停题目、空题库、进行中任务保持年级）\n")

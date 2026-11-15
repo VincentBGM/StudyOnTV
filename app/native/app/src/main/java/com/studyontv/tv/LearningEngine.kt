@@ -45,10 +45,37 @@ object TimePointsMath {
 }
 
 class LearningEngine(private val store: LocalStore) {
+    @Volatile var exitSnapshot = LearningExitSnapshot(false, 0)
+        private set
     private fun number(key: String) = store.get(key, "0").toLongOrNull() ?: 0L
     private fun put(key: String, value: Long) = store.set(key, value.toString())
     private val time = TimePolicy(store) { bootCount() }
     private val videos = VideoLessons(store)
+
+    /** Cache publication must not turn a committed operation into a reported failure. */
+    private fun publishNavigation() {
+        try {
+            if (!store.writableDatabase.inTransaction()) status()
+        } catch (e: Exception) {
+            exitSnapshot = LearningExitSnapshot(false, android.os.SystemClock.elapsedRealtime())
+            android.util.Log.w("StudyOnTV", "Navigation snapshot unavailable", e)
+        }
+    }
+
+    @Synchronized
+    fun switchChild(id: String) {
+        flushUsage()
+        store.switchChild(id)
+        status()
+    }
+
+    @Synchronized
+    fun deleteChild(id: String): Boolean {
+        flushUsage()
+        val deleted = store.deleteChild(id)
+        status()
+        return deleted
+    }
 
     /**
      * 今天还能扣掉的额度：每日上限 - 已用，并且不能超过「距离必须休息」的额度。
@@ -134,7 +161,7 @@ class LearningEngine(private val store: LocalStore) {
     private fun usableCredit(config: JSONObject): Long =
         min(number("credit_ms"), (capacity(config) - usableFree(config)).coerceAtLeast(0))
 
-    @Synchronized fun awake(awake: Boolean) { day(); time.awake(store.config(), awake) }
+    @Synchronized fun awake(awake: Boolean) { day(); time.awake(store.config(), awake); publishNavigation() }
 
     private fun day() {
         val current = store.startOfToday()
@@ -180,7 +207,7 @@ class LearningEngine(private val store: LocalStore) {
             put("free_quota_ms", min(granted, cap))
             db.setTransactionSuccessful()
             return config
-        } finally { db.endTransaction() }
+        } finally { db.endTransaction(); publishNavigation() }
     }
 
     private fun weekSlots(config: JSONObject): List<String>? {
@@ -338,7 +365,9 @@ class LearningEngine(private val store: LocalStore) {
         }
         val nextAt = if (reason == "locked") o?.optLong("until") ?: 0L
             else if (reason in listOf("quota", "rounds", "schedule")) nextAvailable(c, reason != "schedule") else 0L
-        return JSONObject().put("remainingSeconds", remaining / 1000).put("usedMinutes", used / 60000.0)
+        // This is the existing Back/exitToLauncher rule, published once for all navigation clients.
+        val canExit = reason.isEmpty() && (remaining / 1000 > 0 || free)
+        val result = JSONObject().put("remainingSeconds", remaining / 1000).put("usedMinutes", used / 60000.0)
             .put("quizGeneration", number("quiz_generation"))
             .put("extraPool", number("extra_pool")).put("wrongProgress", number("wrong_progress"))
             .put("nextAvailableAt", nextAt).put("nextAtText", if (nextAt > 0) DeviceClock.format(nextAt, store) else "").put("free", free)
@@ -349,6 +378,11 @@ class LearningEngine(private val store: LocalStore) {
             .put("roundsDoneToday", rounds).put("reason", reason).put("override", o ?: JSONObject.NULL).put("awaitingReview", active()?.has("pendingReview") == true)
             // 学生端用 activePoint 显示「网课时间 · 数学」/「大人豁免 · 看电影」
             .put("activePoint", point?.let { JSONObject().put("name", it.name).put("mode", it.mode).put("until", it.until) } ?: JSONObject.NULL)
+            .put("canExit", canExit)
+        // A result computed inside a transaction must not expose an uncommitted reward/unlock.
+        if (!store.writableDatabase.inTransaction())
+            exitSnapshot = LearningExitSnapshot(canExit, android.os.SystemClock.elapsedRealtime())
+        return result
     }
 
     private var pendingUsageMs = 0L
@@ -356,6 +390,10 @@ class LearningEngine(private val store: LocalStore) {
     /** 每秒调用一次。余额每次都持久化，但“使用记录”事件攒到 30 秒再写一条，避免一天写入上万行 */
     @Synchronized
     fun consume(milliseconds: Long) {
+        try { consumeUsage(milliseconds) } finally { publishNavigation() }
+    }
+
+    private fun consumeUsage(milliseconds: Long) {
         day()
         val config = store.config()
         if (time.restLeft(config) > 0 || time.left("feedback_deadline") > 0) { flushUsage(); return }
@@ -478,7 +516,7 @@ class LearningEngine(private val store: LocalStore) {
             repairActiveRound(ids.toSet(), false)
             db.setTransactionSuccessful()
             return deleted
-        } finally { db.endTransaction() }
+        } finally { db.endTransaction(); publishNavigation() }
     }
 
     private fun nextQuestion(round: JSONObject) {
@@ -608,7 +646,7 @@ class LearningEngine(private val store: LocalStore) {
             repairActiveRound(removed, bank == null)
             db.setTransactionSuccessful()
             return deleted
-        } finally { db.endTransaction() }
+        } finally { db.endTransaction(); publishNavigation() }
     }
 
     @Synchronized fun videoProgress(id: String, playing: Boolean): JSONObject {
@@ -631,7 +669,7 @@ class LearningEngine(private val store: LocalStore) {
             store.logEvent("quiz_pass", JSONObject().put("roundId", id).put("minutes", grant / 60000.0).put("video", true))
             db.setTransactionSuccessful()
             return JSONObject().put("rewardMinutes", grant / 60000.0).put("status", status())
-        } finally { db.endTransaction() }
+        } finally { db.endTransaction(); publishNavigation() }
     }
 
     @Synchronized
@@ -687,7 +725,7 @@ class LearningEngine(private val store: LocalStore) {
             store.logEvent("review_graded", JSONObject().put("id", reviewId).put("score", score).put("source", source))
             db.setTransactionSuccessful()
             return review
-        } finally { db.endTransaction() }
+        } finally { db.endTransaction(); publishNavigation() }
     }
 
     private fun normalize(value: String): String = Normalizer.normalize(value.trim(), Normalizer.Form.NFKC)
@@ -737,7 +775,7 @@ class LearningEngine(private val store: LocalStore) {
                 store.set("active_round", round.toString())
                 store.logEvent("review_submitted", JSONObject().put("id", id))
                 db.setTransactionSuccessful()
-            } finally { db.endTransaction() }
+            } finally { db.endTransaction(); publishNavigation() }
             return JSONObject().put("pending", true).put("reviewId", id).put("status", status())
         }
         val expected = if (type == "multiple") question.getJSONArray("correctIndices") else JSONArray().put(question.optInt("k"))
@@ -841,6 +879,6 @@ class LearningEngine(private val store: LocalStore) {
             store.set("last_answer", JSONObject().put("nonce", input.getString("nonce")).put("result", result).toString())
             db.setTransactionSuccessful()
             return result
-        } finally { db.endTransaction() }
+        } finally { db.endTransaction(); publishNavigation() }
     }
 }

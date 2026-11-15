@@ -220,15 +220,13 @@ class LanServer(
         }
         router.post("/api/children/switch") { ctx ->
             // 切换前先把还没落库的观看时长记到原孩子名下，否则会算到下一个孩子头上
-            DeviceRuntime.learning.flushUsage()
-            store.switchChild(JSONObject(ctx.body).optString("id"))
+            DeviceRuntime.learning.switchChild(JSONObject(ctx.body).optString("id"))
             GateService.refreshNow()
             json(ctx.out, 200, JSONObject().put("ok", true).put("items", store.children())
                 .put("active", store.activeChild()))
         }
         router.post("/api/children/delete") { ctx ->
-            DeviceRuntime.learning.flushUsage()
-            store.deleteChild(JSONObject(ctx.body).optString("id"))
+            DeviceRuntime.learning.deleteChild(JSONObject(ctx.body).optString("id"))
             GateService.refreshNow()
             json(ctx.out, 200, JSONObject().put("ok", true).put("items", store.children())
                 .put("active", store.activeChild()))

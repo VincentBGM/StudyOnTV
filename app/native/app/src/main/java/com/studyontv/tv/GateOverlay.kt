@@ -192,6 +192,8 @@ class GateOverlay(
         view.destroy()
     }
 
+    fun showNavigationBlocked(): Boolean = presenting() && LearningNavigation.showBlockedNotice(web)
+
     private inner class Bridge {
         @JavascriptInterface fun apiToken(): String = AdminAuth.deviceToken
         @JavascriptInterface fun deviceInfo(): String = org.json.JSONObject()
@@ -255,9 +257,13 @@ class GateOverlay(
                 context.startActivity(Intent(context, ParentActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }
         }
+        @JavascriptInterface fun navigationBlocked(): Boolean {
+            LearningNavigation.notifyBlocked(context)
+            return true
+        }
         @JavascriptInterface fun exitToLauncher() {
             val status = DeviceRuntime.learning.status()
-            if (status.getString("reason").isNotEmpty() || (status.optLong("remainingSeconds") <= 0 && !status.optBoolean("free"))) return
+            if (!status.optBoolean("canExit")) return
             handler.post {
                 hide()
                 if (goHome?.invoke() != true) context.startActivity(Intent(Intent.ACTION_MAIN)

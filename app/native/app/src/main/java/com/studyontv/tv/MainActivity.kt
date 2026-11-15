@@ -135,6 +135,9 @@ open class MainActivity : Activity() {
         if (::web.isInitialized && !webReleased) web.evaluateJavascript("window.SOTV_RESUME&&SOTV_RESUME()", null)
     }
 
+    fun showNavigationBlocked(): Boolean =
+        if (::web.isInitialized && !webReleased) LearningNavigation.showBlockedNotice(web) else false
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         // #143：创维 A5D Pro / 酷开开启「强制使用全屏学习页」后，遥控器关机键被全屏页吞掉。
         // 电源 / 休眠键任何页面都不处理，原样交还系统；全屏学习页自己先退出，给固件让出正常关机路径。
@@ -159,6 +162,6 @@ open class MainActivity : Activity() {
     companion object {
         /** 电源 / 休眠 / 待机键：任何页面都不能拦截，否则电视关不了机（#143） */
         fun isPowerKey(code: Int): Boolean = code == KeyEvent.KEYCODE_POWER || code == KeyEvent.KEYCODE_SLEEP ||
-            code == KeyEvent.KEYCODE_SOFT_SLEEP || code == KeyEvent.KEYCODE_STANDBY
+            code == KeyEvent.KEYCODE_SOFT_SLEEP
     }
 }
