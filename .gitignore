@@ -51,3 +51,8 @@ StudyOnTV-*.apk
 /.claude/
 /tmp-check/
 
+# 崩溃上报：自建 Cloudflare Worker 只在本机维护，连同端点/令牌和拉下来的报告都不入库
+/crash-collector/
+/.crash-local.json
+/.crash-reports/
+

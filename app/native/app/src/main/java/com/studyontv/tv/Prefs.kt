@@ -66,4 +66,49 @@ object Prefs {
     fun setBuglyConsent(c: Context, v: Boolean) = sp(c).edit().putBoolean("bugly_consent", v).apply()
     fun buglyConsentAsked(c: Context): Boolean = sp(c).getBoolean("bugly_consent_asked", false)
     fun setBuglyConsentAsked(c: Context, v: Boolean) = sp(c).edit().putBoolean("bugly_consent_asked", v).apply()
+
+    // --- 崩溃日志上传（Cloudflare Worker）---
+
+    /** 用户是否同意上传崩溃日志（同意后替代 Bugly，上传到自建 Worker） */
+    fun crashUploadConsent(c: Context): Boolean = sp(c).getBoolean("crash_upload_consent", false)
+    fun setCrashUploadConsent(c: Context, v: Boolean) = sp(c).edit().putBoolean("crash_upload_consent", v).apply()
+    fun crashUploadConsentAsked(c: Context): Boolean = sp(c).getBoolean("crash_upload_consent_asked", false)
+    fun setCrashUploadConsentAsked(c: Context, v: Boolean) = sp(c).edit().putBoolean("crash_upload_consent_asked", v).apply()
+
+    /**
+     * Cloudflare Worker 接收端 URL，家长在面板「设置 → 崩溃报告」里填写。
+     * 格式：https://sotv-crash.xxx.workers.dev/crash
+     * 留空表示只本地存储，不上传。
+     */
+    fun crashEndpoint(c: Context): String = sp(c).getString("crash_endpoint", "") ?: ""
+    fun setCrashEndpoint(c: Context, v: String) = sp(c).edit().putString("crash_endpoint", v).apply()
+
+    /** Worker 的 Bearer Token（防止公开接口被滥用），与 Worker 里的 SECRET_TOKEN 变量一致 */
+    fun crashToken(c: Context): String = sp(c).getString("crash_token", "") ?: ""
+    fun setCrashToken(c: Context, v: String) = sp(c).edit().putString("crash_token", v).apply()
+
+    // --- 观看计时心跳（#148：进程被固件清理后计时停止，重启后补算被杀期间） ---
+    //
+    // 只记录「正在计时」时的墙上时间 / 开机时间 / 深睡时间三个时钟：
+    //  - elapsedRealtime 含深睡，uptimeMillis 不含；取较小者就是「设备真正醒着」的时长，
+    //    这样关机待机数小时不会被当成观看时长；
+    //  - 设备重启后开机时间会归零，由 WatchGap.recoverMs 判断并放弃补算。
+
+    data class WatchBeat(val active: Boolean, val at: Long, val elapsed: Long, val uptime: Long)
+
+    fun watchBeat(c: Context): WatchBeat? {
+        val p = sp(c)
+        if (!p.contains("watch_beat_elapsed")) return null
+        return WatchBeat(p.getBoolean("watch_beat_active", false), p.getLong("watch_beat_at", 0L),
+            p.getLong("watch_beat_elapsed", 0L), p.getLong("watch_beat_uptime", 0L))
+    }
+
+    /** 心跳用同步 commit：进程随时可能被固件直接杀掉，apply 还没落盘就丢了 */
+    fun setWatchBeat(c: Context, beat: WatchBeat) = sp(c).edit()
+        .putBoolean("watch_beat_active", beat.active).putLong("watch_beat_at", beat.at)
+        .putLong("watch_beat_elapsed", beat.elapsed).putLong("watch_beat_uptime", beat.uptime)
+        .commit()
+
+    fun clearWatchBeat(c: Context) = sp(c).edit().remove("watch_beat_active").remove("watch_beat_at")
+        .remove("watch_beat_elapsed").remove("watch_beat_uptime").commit()
 }

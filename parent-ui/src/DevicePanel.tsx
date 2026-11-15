@@ -151,6 +151,9 @@ export default function DevicePanel({
   const [name, setName] = useState('');
   const nameSession = useRef<number | null>(null);
   const submittedName = useRef('');
+  const [endpoint, setEndpoint] = useState('');
+  const [token, setToken] = useState('');
+  const crashSession = useRef<number | null>(null);
   const keepalive = device.data?.keepalive ? keepAliveSummary(device.data) : null;
 
   useEffect(() => {
@@ -160,6 +163,13 @@ export default function DevicePanel({
       submittedName.current = '';
     }
   }, [device.data?.name, sessionId]);
+
+  useEffect(() => {
+    if (device.data?.crashUpload && crashSession.current !== sessionId) {
+      setEndpoint(device.data.crashUpload.endpoint || '');
+      crashSession.current = sessionId;
+    }
+  }, [device.data?.crashUpload?.endpoint, sessionId]);
 
   const startedAt = update.data?.logAt || update.data?.checkedAt;
   useEffect(() => {
@@ -179,11 +189,14 @@ export default function DevicePanel({
     }
   }, [polling, update.data?.checking, update.data?.hasUpdate]);
 
-  const bugly = useMutation({
-    mutationFn: (enabled: boolean) => api('/api/device/bugly', 'PUT', { enabled }),
-    onSuccess: () => {
+  const crash = useMutation({
+    mutationFn: (patch: { consent?: boolean; endpoint?: string; token?: string }) =>
+      api('/api/device/crash', 'PUT', patch),
+    onSuccess: (result: any) => {
+      client.setQueryData(['device', sessionId], (old: any) =>
+        old ? { ...old, crashUpload: result.crashUpload } : old,
+      );
       client.invalidateQueries({ queryKey: ['device', sessionId] });
-      toast.success(device.data?.buglyConsent ? '崩溃报告已关闭，下次启动生效' : '崩溃报告已开启');
     },
     onError: (error: any) => toast.error(error.message),
   });
@@ -257,6 +270,18 @@ export default function DevicePanel({
     }
     submittedName.current = name;
     rename.mutate(nextName);
+  };
+  const saveEndpoint = () => {
+    const next = endpoint.trim();
+    if (!device.data || crash.isPending) return;
+    if (next === (device.data.crashUpload?.endpoint || '').trim()) return;
+    crash.mutate({ endpoint: next });
+  };
+  const saveToken = () => {
+    const next = token.trim();
+    // 令牌只写不读：留空表示不改动已保存的值
+    if (!next || crash.isPending) return;
+    crash.mutate({ token: next }, { onSuccess: () => setToken('') });
   };
 
   useEffect(() => {
@@ -556,12 +581,60 @@ export default function DevicePanel({
             </SettingItem>
             <SettingItem
               title="崩溃报告"
-              description="仅上传调用堆栈、设备型号和应用版本。"
+              description="崩溃后自动上传调用堆栈、设备型号和应用版本；不含题库、管理密码和答题记录。需先填好下面的上报地址。"
             >
               <Switch
                 aria-label="崩溃报告"
-                checked={!!device.data?.buglyConsent}
-                onCheckedChange={value => bugly.mutate(value)}
+                checked={!!device.data?.crashUpload?.consent}
+                disabled={crash.isPending || !device.data}
+                onCheckedChange={value => crash.mutate({ consent: value })}
+              />
+            </SettingItem>
+            <SettingItem
+              title="上报地址"
+              description={
+                device.data?.crashUpload?.pending
+                  ? '有 1 份崩溃日志待上传，填好地址后下次启动会自动补传。'
+                  : 'Cloudflare Worker 地址，留空表示只在本机保留日志。'
+              }
+              wideControl
+            >
+              <Input
+                aria-label="崩溃上报地址"
+                className="h-9 w-full sm:w-80"
+                placeholder="https://sotv-crash.xxx.workers.dev/crash"
+                autoComplete="off"
+                spellCheck={false}
+                value={endpoint}
+                onChange={event => setEndpoint(event.target.value)}
+                onBlur={saveEndpoint}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') event.currentTarget.blur();
+                }}
+              />
+            </SettingItem>
+            <SettingItem
+              title="访问令牌"
+              description={
+                device.data?.crashUpload?.hasToken
+                  ? '已保存令牌。留空表示不修改。'
+                  : '与 Worker 里的 SECRET_TOKEN 一致，防止上报地址被外人滥用。'
+              }
+              wideControl
+            >
+              <Input
+                aria-label="崩溃上报令牌"
+                type="password"
+                className="h-9 w-full sm:w-80"
+                placeholder={device.data?.crashUpload?.hasToken ? '已保存，留空不修改' : '粘贴 Worker 的访问令牌'}
+                autoComplete="off"
+                spellCheck={false}
+                value={token}
+                onChange={event => setToken(event.target.value)}
+                onBlur={saveToken}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') event.currentTarget.blur();
+                }}
               />
             </SettingItem>
             <SettingItem title="设备名称" wideControl>
