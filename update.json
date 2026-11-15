@@ -2,19 +2,19 @@
   "version": "0.4.1",
   "versionCode": 43,
   "force": false,
-  "notes": "fix: LanServer 传入 context 调用 TtsProbe.defaultEngine",
-  "publishedAt": "2026-11-15T16:18:40.744Z",
+  "notes": "step 的 if 里不能直接引用 secrets 上下文，GitHub 会判定整个工作流无效，\n之后每次推送只留下一条 0 秒失败记录，一个作业都不会启动。\n\n改为在 job 级声明 PGYER_API_KEY: ${{ secrets.PGYER_API_KEY }}，\n两个上传步骤用 if: env.PGYER_API_KEY != '' 判断，curl 里用 ${PGYER_API_KEY}。\n没有该 secret 时仍然跳过上传。",
+  "publishedAt": "2026-11-15T16:51:35.888Z",
   "assets": {
     "tv": {
       "name": "StudyOnTV-Android-TV-v0.4.1.apk",
       "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.4.1/StudyOnTV-Android-TV-v0.4.1.apk",
-      "sha256": "c78a2d970940ccee90b5f4885ab0cabe449e26ab45f8301e69a52e1336247389",
+      "sha256": "bb3fb2ce38eed511cbd0283dd2ce92cb119bbdcfdb02d0da39adf54a5895e7aa",
       "size": 3454024
     },
     "mobile": {
       "name": "StudyOnTV-Mobile-v0.4.1.apk",
       "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.4.1/StudyOnTV-Mobile-v0.4.1.apk",
-      "sha256": "2139157c7cab1cc3940006c97b26b0f658598a015e7a8cadb5b9817afdbe057d",
+      "sha256": "f1d65bf2fcd28e590e0b19dd0e727ffd527e4ee0d24e9343e74ea6fe7d21f7a3",
       "size": 3456085
     }
   }
