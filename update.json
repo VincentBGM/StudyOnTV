@@ -1,21 +1,21 @@
 {
-  "version": "0.4.1",
-  "versionCode": 43,
+  "version": "0.4.2",
+  "versionCode": 44,
   "force": false,
-  "notes": "上传接口要的是 _api_key，写 apiKey 会被当成没传密钥，\n返回 {\"code\":1001,\"message\":\"_api_key could not be empty\"}。",
-  "publishedAt": "2026-11-15T16:55:46.547Z",
+  "notes": "朗读设置从「学习计划 → 更多」移到「设置 → 朗读」，计划页原位置保留一行跳转提示。\n\n设置页顶部新增全局面板搜索，覆盖设置各分区以及首页、学习计划、题库、批改、记录，\n选中后跳到对应页面，能定位到具体设置项时滚动到该项。\n\n朗读内容新增三档：只读题目、题目和选项、题目选项和答案。答案在作答之后再读，\n作答前不读出；设备端 /api/speech 保存 readScope，学习页按该范围拼朗读文本，\n朗读前去掉公式的 $ 符号。\n\n回归新增朗读内容默认值、保存与非法值拒绝；watchAndWhitelist 改为先由家长加时\n发余额再验证补算扣时，余额为 0 时本来就没有可扣的时长。",
+  "publishedAt": "2026-11-15T18:22:57.184Z",
   "assets": {
     "tv": {
-      "name": "StudyOnTV-Android-TV-v0.4.1.apk",
-      "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.4.1/StudyOnTV-Android-TV-v0.4.1.apk",
-      "sha256": "61a7e2231735dd6b3698e96f849444f6eff05b25ab6bf0e8261ac33e674872dc",
-      "size": 3454024
+      "name": "StudyOnTV-Android-TV-v0.4.2.apk",
+      "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.4.2/StudyOnTV-Android-TV-v0.4.2.apk",
+      "sha256": "5ee4cab848b9c1c8b9f134b9800cc5c4f8056f25d44722c039c032a71ebca1a1",
+      "size": 3457250
     },
     "mobile": {
-      "name": "StudyOnTV-Mobile-v0.4.1.apk",
-      "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.4.1/StudyOnTV-Mobile-v0.4.1.apk",
-      "sha256": "d1268ea121eb3138370fec09202cdcdf8a240f2a5aa786d2b5ae5c3a9e8d4bf6",
-      "size": 3456085
+      "name": "StudyOnTV-Mobile-v0.4.2.apk",
+      "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.4.2/StudyOnTV-Mobile-v0.4.2.apk",
+      "sha256": "39ea9c32af3220a5818855766e376da8a6a2b943a07289d09f08db97f341fce7",
+      "size": 3459109
     }
   }
 }
