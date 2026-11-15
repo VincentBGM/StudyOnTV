@@ -31,6 +31,18 @@
   }
   function canVoice() { return !!(window.SOTVNative && typeof window.SOTVNative.answerVoice === 'function'); }
   function canRead() { return !!(window.SOTVNative && typeof window.SOTVNative.readInLanguage === 'function'); }
+  // 朗读内容由家长在「设置 → 朗读」里定：只读题干、题干加选项、再加答案（答案在作答后才读）
+  function readScope() { return (state.speech && state.speech.readScope) || 'question'; }
+  // 公式里的 $ 符号 TTS 会念出来，朗读前去掉
+  function speakable(text) { return String(text == null ? '' : text).replace(/\$\$?/g, '').trim(); }
+  function readText(item) {
+    if (!item) return '';
+    var parts = [speakable(item.q)];
+    if (readScope() !== 'question') {
+      (item.a || []).forEach(function (value, index) { parts.push(String.fromCharCode(65 + index) + '、' + speakable(value)); });
+    }
+    return parts.join('。');
+  }
   // 答题 / 锁定页的家长解锁入口（默认关闭，家长在「时间计划」里打开）
   function canUnlock() { return !!(window.SOTVNative && typeof window.SOTVNative.askParentPassword === 'function' && typeof window.SOTVNative.quizUnlock === 'function'); }
   function nativeCall(name, args) {
@@ -202,7 +214,7 @@
     var qLength = (item.q || '').length;
     $('qText').className = 'question' + (qLength > 120 ? ' longer' : qLength > 56 ? ' long' : '');
     nativeCall('stopReading');
-    if (state.speech && state.speech.autoRead) nativeCall('readInLanguage', [item.q, item.language || '']);
+    if (state.speech && state.speech.autoRead) nativeCall('readInLanguage', [readText(item), item.language || '']);
     renderMedia(item);
     var options = $('qOptions'); options.innerHTML = '';
     var longest = 0, optionCount = (item.a || []).length;
@@ -364,6 +376,12 @@
     $('fbTitle').textContent = title;
     $('fbAnswer').textContent = answer ? '正确答案：' + answer : '';
     $('fbTip').textContent = result.tip ? '解析：' + result.tip : '';
+    // 「题目、选项和答案」：作答之后再读正确答案，作答前不剧透
+    if (state.speech && state.speech.autoRead && readScope() === 'questionOptionsAnswer') {
+      var spokenAnswer = written ? speakable(result.answerText || '')
+        : (result.correctIndices || []).map(function (i) { return String.fromCharCode(65 + i) + '、' + speakable((item.a || [])[i]); }).join('，');
+      if (spokenAnswer) nativeCall('readInLanguage', ['正确答案：' + spokenAnswer, item.language || '']);
+    }
     var go = $('fbNext');
     state.feedbackUntil = Date.now() + ((result.status && result.status.feedbackSeconds) || 0) * 1000;
     go.textContent = result.finished ? '查看结果' : '继续';
@@ -634,7 +652,7 @@
     if (action === 'clear-drawing') { state.draft.drawing = ''; renderQuestion(); }
     if (action === 'watch-lesson') nativeCall('watchLesson');
     if (action === 'play-audio' && state.round) nativeCall('playAudio', [state.round.question.audio || '']);
-    if (action === 'read-aloud') nativeCall('readInLanguage', [state.round ? state.round.question.q : '', state.round ? state.round.question.language || '' : '']);
+    if (action === 'read-aloud') nativeCall('readInLanguage', [state.round ? readText(state.round.question) : '', state.round ? state.round.question.language || '' : '']);
     // retry 用于错误 / 空题库的重试，start-quiz 用于「时间到了」页的「开始答题」；两者都重新取题
     if (action === 'retry' || action === 'start-quiz') start();
     if (action === 'start-as-child' && !state.busy) {
