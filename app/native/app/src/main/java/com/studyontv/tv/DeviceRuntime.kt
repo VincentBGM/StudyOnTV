@@ -36,6 +36,9 @@ object DeviceRuntime {
         })
         store = LocalStore(app)
         SeedAssets.ensureQuestions(app, store)
+        // 同步框架自愈：注册复活账户（幂等），持有 WRITE_SECURE_SETTINGS 时顺带修复无障碍
+        GuardSync.ensure(app)
+        GuardSync.heal(app)
         learning = LearningEngine(store)
         server = LanServer(app, store, app.assets).also {
             it.start()
