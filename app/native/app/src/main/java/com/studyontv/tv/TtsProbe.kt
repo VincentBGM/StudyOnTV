@@ -28,7 +28,15 @@ object TtsProbe {
     /** 初始化失败或超时的 langStatus，和 TextToSpeech 的 LANG_* 负数区分开 */
     const val STATUS_INIT_FAILED = -99
 
-    fun defaultEngine(): String = try { TextToSpeech.getDefaultEngine() ?: "" } catch (_: Throwable) { "" }
+    /**
+     * 从系统设置读取默认 TTS 引擎包名（Settings.Secure.TTS_DEFAULT_SYNTH）。
+     * TextToSpeech.getDefaultEngine() 是 instance 方法，不能在静态上下文用。
+     */
+    fun defaultEngine(context: Context): String = try {
+        android.provider.Settings.Secure.getString(
+            context.contentResolver, "tts_default_synth"
+        ) ?: ""
+    } catch (_: Throwable) { "" }
 
     /**
      * 已安装的 TTS 引擎：只查 PackageManager，不初始化引擎，很快。
@@ -36,7 +44,7 @@ object TtsProbe {
      */
     fun installedEngines(context: Context): JSONArray {
         val pm = context.packageManager
-        val default = defaultEngine()
+        val default = defaultEngine(context)
         val out = JSONArray()
         val seen = HashSet<String>()
         try {
@@ -59,7 +67,7 @@ object TtsProbe {
      */
     fun probe(context: Context, language: String = "zh-CN", timeoutMs: Long = TIMEOUT_MS): JSONObject {
         val app = context.applicationContext
-        val engine = defaultEngine()
+        val engine = defaultEngine(app)
         val tag = SpeechReader.normalizeLanguageTag(language)
         val result = JSONObject().put("engine", engine).put("language", tag).put("ok", false)
             .put("langStatus", STATUS_INIT_FAILED)
