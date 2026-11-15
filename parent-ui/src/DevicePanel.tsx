@@ -581,7 +581,11 @@ export default function DevicePanel({
             </SettingItem>
             <SettingItem
               title="崩溃报告"
-              description="崩溃后自动上传调用堆栈、设备型号和应用版本；不含题库、管理密码和答题记录。需先填好下面的上报地址。"
+              description={
+                device.data?.crashUpload?.builtInEndpoint
+                  ? '崩溃后自动上传调用堆栈、设备型号和应用版本；不含题库、管理密码和答题记录。'
+                  : '崩溃后自动上传调用堆栈、设备型号和应用版本；不含题库、管理密码和答题记录。需先填好下面的上报地址。'
+              }
             >
               <Switch
                 aria-label="崩溃报告"
@@ -594,15 +598,17 @@ export default function DevicePanel({
               title="上报地址"
               description={
                 device.data?.crashUpload?.pending
-                  ? '有 1 份崩溃日志待上传，填好地址后下次启动会自动补传。'
-                  : 'Cloudflare Worker 地址，留空表示只在本机保留日志。'
+                  ? '有 1 份崩溃日志待上传，下次启动会自动补传。'
+                  : device.data?.crashUpload?.builtInEndpoint
+                    ? '不填就用内置地址；填了会覆盖内置值。'
+                    : 'Cloudflare Worker 地址，留空表示只在本机保留日志。'
               }
               wideControl
             >
               <Input
                 aria-label="崩溃上报地址"
                 className="h-9 w-full sm:w-80"
-                placeholder="https://sotv-crash.xxx.workers.dev/crash"
+                placeholder={device.data?.crashUpload?.builtInEndpoint || 'https://sotv-crash.xxx.workers.dev/crash'}
                 autoComplete="off"
                 spellCheck={false}
                 value={endpoint}
@@ -616,9 +622,11 @@ export default function DevicePanel({
             <SettingItem
               title="访问令牌"
               description={
-                device.data?.crashUpload?.hasToken
-                  ? '已保存令牌。留空表示不修改。'
-                  : '与 Worker 里的 SECRET_TOKEN 一致，防止上报地址被外人滥用。'
+                device.data?.crashUpload?.builtInToken
+                  ? '已内置令牌，留空不改；填了会覆盖它。'
+                  : device.data?.crashUpload?.hasToken
+                    ? '已保存令牌。留空表示不修改。'
+                    : '与 Worker 里的 SECRET_TOKEN 一致，防止上报地址被外人滥用。'
               }
               wideControl
             >

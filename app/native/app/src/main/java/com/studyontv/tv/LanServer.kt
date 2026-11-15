@@ -613,8 +613,11 @@ class LanServer(
     /** 崩溃上报配置（不回传 token 明文，只告诉面板有没有存过） */
     private fun crashUploadState(context: android.content.Context) = JSONObject()
         .put("consent", Prefs.crashUploadConsent(context))
-        .put("endpoint", Prefs.crashEndpoint(context))
+        .put("endpoint", Prefs.crashEndpointStored(context))
+        // 构建时内置的默认地址：面板里留空就用它，填了会覆盖
+        .put("builtInEndpoint", BuildConfig.CRASH_ENDPOINT)
         .put("hasToken", Prefs.crashToken(context).isNotBlank())
+        .put("builtInToken", BuildConfig.CRASH_TOKEN.isNotBlank())
         .put("pending", CrashDetector.hasPending(context))
 
     private fun json(out: OutputStream, code: Int, obj: JSONObject) =

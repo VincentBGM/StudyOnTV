@@ -56,6 +56,8 @@ jobs:
           KEYSTORE_PASS=${{ secrets.KEYSTORE_PASS }}
           KEY_ALIAS=${{ secrets.KEY_ALIAS }}
           KEY_PASS=${{ secrets.KEY_PASS }}
+          CRASH_ENDPOINT=${{ secrets.CRASH_ENDPOINT }}
+          CRASH_TOKEN=${{ secrets.CRASH_TOKEN }}
           EOF
 
       # ── 3. 构建 Android APK ───────────────────────────────────────────

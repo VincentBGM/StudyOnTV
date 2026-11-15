@@ -76,16 +76,18 @@ object Prefs {
     fun setCrashUploadConsentAsked(c: Context, v: Boolean) = sp(c).edit().putBoolean("crash_upload_consent_asked", v).apply()
 
     /**
-     * Cloudflare Worker 接收端 URL，家长在面板「设置 → 崩溃报告」里填写。
-     * 格式：https://sotv-crash.xxx.workers.dev/crash
-     * 留空表示只本地存储，不上传。
+     * Cloudflare Worker 接收端 URL。面板里填了就优先用面板的，
+     * 没填则用构建时内置的 BuildConfig.CRASH_ENDPOINT（local.properties / 环境变量注入，不入库）。
+     * 两处都为空表示只本地存储，不上传。
      */
-    fun crashEndpoint(c: Context): String = sp(c).getString("crash_endpoint", "") ?: ""
+    fun crashEndpointStored(c: Context): String = sp(c).getString("crash_endpoint", "") ?: ""
     fun setCrashEndpoint(c: Context, v: String) = sp(c).edit().putString("crash_endpoint", v).apply()
+    fun crashEndpoint(c: Context): String = crashEndpointStored(c).ifBlank { BuildConfig.CRASH_ENDPOINT }
 
-    /** Worker 的 Bearer Token（防止公开接口被滥用），与 Worker 里的 SECRET_TOKEN 变量一致 */
-    fun crashToken(c: Context): String = sp(c).getString("crash_token", "") ?: ""
+    /** Worker 的 Bearer Token，与 Worker 里的 SECRET_TOKEN 一致；同样支持内置默认值 */
+    fun crashTokenStored(c: Context): String = sp(c).getString("crash_token", "") ?: ""
     fun setCrashToken(c: Context, v: String) = sp(c).edit().putString("crash_token", v).apply()
+    fun crashToken(c: Context): String = crashTokenStored(c).ifBlank { BuildConfig.CRASH_TOKEN }
 
     // --- 观看计时心跳（#148：进程被固件清理后计时停止，重启后补算被杀期间） ---
     //

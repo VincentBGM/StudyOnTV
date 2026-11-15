@@ -23,6 +23,12 @@ android {
         versionName = "0.3.36"
         // 带电视桌面的包在 desktop 这个 buildType 里改成 true
         buildConfigField("boolean", "DESKTOP", "false")
+        // 崩溃上报的默认地址/令牌：从 local.properties 或环境变量注入（都不入库），
+        // 留空表示不内置——设备只在本机保留日志，家长可在面板里自己填。
+        val crashEndpoint = localProps.getProperty("CRASH_ENDPOINT") ?: System.getenv("CRASH_ENDPOINT") ?: ""
+        val crashToken = localProps.getProperty("CRASH_TOKEN") ?: System.getenv("CRASH_TOKEN") ?: ""
+        buildConfigField("String", "CRASH_ENDPOINT", "\"$crashEndpoint\"")
+        buildConfigField("String", "CRASH_TOKEN", "\"$crashToken\"")
     }
 
     flavorDimensions += "device"
