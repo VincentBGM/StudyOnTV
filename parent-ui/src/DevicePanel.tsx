@@ -182,7 +182,7 @@ export default function DevicePanel({
         update.data.log.length &&
         update.data.log.every((item: any) => !item.ok)
       ) {
-        toast.error('检查更新失败，请稍后再试');
+        toast.error(`检查更新失败：${update.data.log[0]?.message || '网络不通，请稍后再试'}`);
       } else {
         toast.success('当前已是最新版本');
       }
@@ -382,6 +382,10 @@ export default function DevicePanel({
   const unlockCurl = `curl -X POST "${integrationBase}/api/remote" -H "Authorization: Bearer ${displayToken}" -H "Content-Type: application/json" -d '{"action":"unlock","minutes":30}'`;
   const haYaml = `sensor:\n  - platform: rest\n    name: 题了个题\n    resource: ${integrationBase}/api/state\n    headers:\n      Authorization: Bearer <集成令牌>\n    value_template: "{{ value_json.learning.remainingSeconds }}"\n    json_attributes:\n      - learning\n      - today\n    scan_interval: 60`;
   const updateInfo = update.data;
+  const failedSources = ((updateInfo?.log || []) as any[]).filter(item => item && !item.ok);
+  const adbScript = `adb connect ${device.data?.ip || '电视IP'}:5555\nadb install -r StudyOnTV-${
+    device.data?.flavor === 'tv' ? 'TV' : 'Mobile'
+  }-v${updateInfo?.latest || '新版'}.apk`;
 
   return (
     <>
@@ -871,6 +875,47 @@ export default function DevicePanel({
               >
                 {null}
               </SettingItem>
+            )}
+            {failedSources.length > 0 && (
+              <SettingItem
+                title="上次检查没成功"
+                description={
+                  <>
+                    {failedSources.map(item => `${item.source}：${item.message}`).join('；')}。
+                    常见原因是电视没联网、路由器拦了 DNS，或者发布服务器暂时不可用，过一会儿再点「检查更新」即可。
+                  </>
+                }
+              >
+                {null}
+              </SettingItem>
+            )}
+            {(updateInfo?.hasUpdate || updateInfo?.installError) && (
+              <>
+              <SettingItem
+                wideControl
+                title="电视上装不上时，用电脑安装"
+                description="在电视上打开 设置 → 系统 → 开发者选项，开启「USB 调试」和「网络调试」，然后在电脑终端里依次执行："
+              >
+                <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto">
+                  {updateInfo?.url && (
+                    <Button variant="outline" asChild>
+                      <a href={updateInfo.url} target="_blank" rel="noreferrer">
+                        下载安装包
+                      </a>
+                    </Button>
+                  )}
+                  <Button variant="outline" onClick={() => copy(adbScript)}>
+                    <Copy />
+                    复制命令
+                  </Button>
+                </div>
+              </SettingItem>
+              <div className="pb-4">
+                <pre className="overflow-x-auto rounded-lg border border-border/70 bg-muted/40 p-3 text-xs leading-5">
+                  {adbScript}
+                </pre>
+              </div>
+              </>
             )}
           </SettingsCard>
         )}

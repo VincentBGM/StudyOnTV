@@ -47,6 +47,12 @@ const update={current:'0.3.10',version:'0.3.10',checking:false,hasUpdate:false,m
 export async function previewApi(path:string,method:string,body:any){
  const route=path.split('?')[0];
  if(route==='/api/state')return structuredClone({config,learning,questions:questions.length,repetition:{studied:8,due:3},children,activeChild:children.find(c=>c.active)?.id||''});
+ if(route==='/api/apps')return{items:[
+  {package:'com.android.systemui.screensaver',name:'系统屏保'},
+  {package:'com.example.onlineclass',name:'网课 · 数学同步'},
+  {package:'com.example.video',name:'云视听小电视'},
+  {package:'com.example.music',name:'音乐'},
+ ]};
  if(route==='/api/children'){
   if(method==='POST'){const name=String(body.name||'').trim();if(!name||children.some(c=>c.name===name))throw new Error('名字为空或重复');children.push({id:'preview-'+children.length,name,createdAt:Date.now(),active:false});}
   else if(method==='PUT'){children=children.map(c=>c.id===body.id?{...c,name:String(body.name||'').trim()}:c);}

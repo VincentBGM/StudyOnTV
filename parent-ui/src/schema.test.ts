@@ -41,4 +41,19 @@ assert.equal(ruleSchema.safeParse({...defaults,fontScale:74}).success,false);
 assert.equal(ruleSchema.safeParse({...defaults,learningContent:'video',educationalVideos:[]}).success,false);
 assert.equal(ruleSchema.safeParse({...defaults,learningContent:'video',educationalVideos:['https://example.test/video.mp4']}).success,true);
 assert.equal(ruleSchema.safeParse({...defaults,learningContent:'video',educationalVideos:['ftp://example.test/video.mp4']}).success,false);
-console.log('PASS schedule validation, quotas, rest/review/font bounds, video settings and backward-compatible defaults');
+// #148 / P1：不计时白名单与答题页密码解锁。旧配置没有这两个键时按关闭处理。
+const oldPolicy={...defaults} as Record<string,unknown>;
+delete oldPolicy.allowQuizUnlock;delete oldPolicy.watchWhitelist;
+const oldParsed=ruleSchema.parse(oldPolicy);
+assert.equal(oldParsed.allowQuizUnlock,false);
+assert.deepEqual(oldParsed.watchWhitelist,[]);
+assert.equal(ruleSchema.safeParse({...defaults,allowQuizUnlock:true}).success,true);
+assert.equal(ruleSchema.safeParse({...defaults,watchWhitelist:['com.example.app']}).success,true);
+assert.equal(ruleSchema.safeParse({...defaults,watchWhitelist:['not a package']}).success,false);
+assert.equal(ruleSchema.safeParse({...defaults,watchWhitelist:Array.from({length:101},(_,i)=>`com.example.app${i}`)}).success,false);
+// #230：出题顺序「没做过的题先出」。旧配置没有这个键时按关闭处理。
+const orderConfig={...defaults} as Record<string,unknown>;
+delete orderConfig.newFirst;
+assert.equal(ruleSchema.parse(orderConfig).newFirst,false);
+assert.equal(ruleSchema.parse({...defaults,newFirst:true}).newFirst,true);
+console.log('PASS schedule validation, quotas, rest/review/font bounds, video settings, watch whitelist, question order and backward-compatible defaults');

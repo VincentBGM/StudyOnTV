@@ -29,6 +29,7 @@ import { api } from './api';
 import { defaults, ruleSchema, zoneOptions, type Rules } from './schema';
 import SpeechSettings from './SpeechSettings';
 import TimePoints from './TimePoints';
+import WatchWhitelistField from './WatchWhitelistField';
 import WeekSchedule from './WeekSchedule';
 
 /** 数字步进器：输入过程中先保留原始文本，失焦时再夹到 min–max。
@@ -134,19 +135,21 @@ const fieldLabels: Record<string, string> = {
   showCountdown: '显示剩余时间角标',
   roundsLimitEnabled: '启用每日组数上限',
   restEnabled: '强制休息',
-  trafficAssistEnabled: '流量辅助识别播放',
-  backgroundAnchorEnabled: '后台保活锚点窗口',
-  blockSettingsDuringControl: '锁定时禁止改系统设置',
+  trafficAssistEnabled: '按流量判断是否在播放',
+  backgroundAnchorEnabled: '保留后台空窗口',
+  blockSettingsDuringControl: '锁定时不允许进系统设置',
   allDay: '全天管控',
   childSelectLevel: '孩子选择年级',
   difficultyRewardEnabled: '按题目星级奖励',
   extraEnabled: '答错累计加练',
-  spacedRepetitionEnabled: '间隔重复复习',
-  wrongFirst: '错题优先',
-  coverageFirst: '覆盖优先',
+  spacedRepetitionEnabled: '按记忆曲线复习',
+  newFirst: '没做过的题先出',
+  wrongFirst: '答错的题先出',
+  coverageFirst: '没答对的题先出',
+  allowQuizUnlock: '答题页输密码解锁',
 };
 
-const errorNames: Record<string, string> = { timePoints: '网课时段', exemptWindows: '大人豁免' };
+const errorNames: Record<string, string> = { timePoints: '网课时段', exemptWindows: '大人豁免', watchWhitelist: '不计时应用' };
 
 const localizeMessage = (message: string) =>
   message
@@ -759,18 +762,27 @@ export default function RulesPage({ state, sessionId }: { state: any; sessionId:
                 </Field>
                 <Field orientation="responsive" className="py-3.5">
                   <FieldContent>
-                    <FieldTitle>错题优先</FieldTitle>
+                    <FieldTitle>没做过的题先出</FieldTitle>
                     <FieldDescription className="text-xs leading-5">
-                      错题优先再出；答对一次后恢复正常顺序
+                      孩子一次都没见过的题排在前面；见过的题按正常顺序。和下面「答错的题先出」同时打开时，答错的题仍然最前。
+                    </FieldDescription>
+                  </FieldContent>
+                  {toggle('newFirst')}
+                </Field>
+                <Field orientation="responsive" className="py-3.5">
+                  <FieldContent>
+                    <FieldTitle>答错的题先出</FieldTitle>
+                    <FieldDescription className="text-xs leading-5">
+                      答错的题下一轮先回来重练，答对一次后恢复正常顺序
                     </FieldDescription>
                   </FieldContent>
                   {toggle('wrongFirst')}
                 </Field>
                 <Field orientation="responsive" className="py-3.5">
                   <FieldContent>
-                    <FieldTitle>覆盖优先</FieldTitle>
+                    <FieldTitle>没答对的题先出</FieldTitle>
                     <FieldDescription className="text-xs leading-5">
-                      还没答对过的题先出，直到每道题都答对一次
+                      还没答对过的题排在前面，保证整本题库都能过一遍
                     </FieldDescription>
                   </FieldContent>
                   {toggle('coverageFirst')}
@@ -831,27 +843,27 @@ export default function RulesPage({ state, sessionId }: { state: any; sessionId:
                 )}
                 <Field orientation="responsive" className="py-3.5">
                   <FieldContent>
-                    <FieldTitle>流量辅助识别播放</FieldTitle>
+                    <FieldTitle>按流量判断是否在播放</FieldTitle>
                     <FieldDescription className="text-xs leading-5">
-                      每 60 秒采样；下载流量不计时
+                      有的电视识别不到正在播放的视频。打开后，只要有声音、同时网络有明显下载，就当作在看视频
                     </FieldDescription>
                   </FieldContent>
                   {toggle('trafficAssistEnabled')}
                 </Field>
                 <Field orientation="responsive" className="py-3.5">
                   <FieldContent>
-                    <FieldTitle>后台保活锚点窗口</FieldTitle>
+                    <FieldTitle>保留后台空窗口</FieldTitle>
                     <FieldDescription className="text-xs leading-5">
-                      小米固件可能清理后台窗口，异常时可关闭实测
+                      部分小米电视会清理后台窗口，导致计时中断。计时不稳定时可以关掉它试试
                     </FieldDescription>
                   </FieldContent>
                   {toggle('backgroundAnchorEnabled')}
                 </Field>
                 <Field orientation="responsive" className="py-3.5">
                   <FieldContent>
-                    <FieldTitle>锁定时禁止改系统设置</FieldTitle>
+                    <FieldTitle>锁定时不允许进系统设置</FieldTitle>
                     <FieldDescription className="text-xs leading-5">
-                      锁定期间无法进入系统设置；需要无障碍权限
+                      锁定期间打不开系统设置；需要开启无障碍权限
                     </FieldDescription>
                   </FieldContent>
                   {toggle('blockSettingsDuringControl')}
@@ -864,6 +876,33 @@ export default function RulesPage({ state, sessionId }: { state: any; sessionId:
                     </FieldDescription>
                   </FieldContent>
                   {toggle('forceFullscreenGate')}
+                </Field>
+                <Field orientation="responsive" className="py-3.5">
+                  <FieldContent>
+                    <FieldTitle>答题页输密码解锁</FieldTitle>
+                    <FieldDescription className="text-xs leading-5">
+                      锁定页显示「家长验证解锁」，输对管理密码可临时解锁 30 分钟；默认关闭
+                    </FieldDescription>
+                  </FieldContent>
+                  {toggle('allowQuizUnlock')}
+                </Field>
+                <Field className="py-3.5">
+                  <FieldContent>
+                    <FieldTitle>不计时的应用</FieldTitle>
+                    <FieldDescription className="text-xs leading-5">
+                      这些应用在前台时不扣观看时长、不弹题，适合系统屏保、网课 App。最多 100 个。
+                    </FieldDescription>
+                  </FieldContent>
+                  <Controller
+                    name="watchWhitelist"
+                    control={form.control}
+                    render={({ field }) => (
+                      <WatchWhitelistField
+                        value={field.value || []}
+                        onChange={field.onChange}
+                      />
+                    )}
+                  />
                 </Field>
                 <Field orientation="responsive" className="py-3.5">
                   <FieldContent>
@@ -944,8 +983,8 @@ export default function RulesPage({ state, sessionId }: { state: any; sessionId:
                 )}
                 <Field orientation="responsive" className="py-3.5">
                   <FieldContent>
-                    <FieldTitle>间隔重复复习</FieldTitle>
-                    <FieldDescription className="text-xs leading-5">优先复习到期题</FieldDescription>
+                    <FieldTitle>按记忆曲线复习</FieldTitle>
+                    <FieldDescription className="text-xs leading-5">到该复习的时候自动先出，答对后间隔会拉长</FieldDescription>
                   </FieldContent>
                   {toggle('spacedRepetitionEnabled')}
                 </Field>
