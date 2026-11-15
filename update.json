@@ -2,20 +2,20 @@
   "version": "0.4.1",
   "versionCode": 43,
   "force": false,
-  "notes": "• 修复本地语音（系统 TTS）读不出声音的问题：区分「没有安装 TTS 引擎」「有引擎但缺中文语言包」「语言不支持」三种情况，并给出具体提示\n• 修复部分手机系统语言标签（如 zh-Hans-CN）导致引擎误判语言包缺失的问题\n• 面板「题目朗读」新增一键检测本地语音、测试朗读、跳转安装语言包等自助排查工具",
-  "publishedAt": "2026-11-16T01:05:00.000Z",
+  "notes": "fix: LanServer 传入 context 调用 TtsProbe.defaultEngine",
+  "publishedAt": "2026-11-15T16:18:40.744Z",
   "assets": {
     "tv": {
       "name": "StudyOnTV-Android-TV-v0.4.1.apk",
       "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.4.1/StudyOnTV-Android-TV-v0.4.1.apk",
-      "sha256": "",
-      "size": 0
+      "sha256": "c78a2d970940ccee90b5f4885ab0cabe449e26ab45f8301e69a52e1336247389",
+      "size": 3454024
     },
     "mobile": {
       "name": "StudyOnTV-Mobile-v0.4.1.apk",
       "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.4.1/StudyOnTV-Mobile-v0.4.1.apk",
-      "sha256": "",
-      "size": 0
+      "sha256": "2139157c7cab1cc3940006c97b26b0f658598a015e7a8cadb5b9817afdbe057d",
+      "size": 3456085
     }
   }
 }
