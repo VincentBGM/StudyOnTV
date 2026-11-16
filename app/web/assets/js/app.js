@@ -4,6 +4,15 @@
   var all = function (selector) { return Array.prototype.slice.call(document.querySelectorAll(selector)); };
   var state = { screen: '', round: null, config: {}, learning: {}, busy: false, selected: [], version: 0, awaiting: false, reviewed: false, review: null, draft: null, unlockPending: false };
   var toastTimer, nextTimer, taps = 0, lastTap = 0, upTaps = 0, lastUpTap = 0;
+  var QUESTION_INPUT_GUARD_MS = 300;
+  var renderedQuestionNonce = null, questionInputAllowedAt = 0;
+  function questionInputTime() {
+    return window.performance && typeof window.performance.now === 'function' ? window.performance.now() : Date.now();
+  }
+  function questionInputBlocked() {
+    return state.screen === 'quiz' && state.round && state.round.nonce === renderedQuestionNonce &&
+      questionInputTime() < questionInputAllowedAt;
+  }
   // 断电 / 被系统清后台后恢复当前这组题。用 localStorage 而不是 sessionStorage：
   // 进程被杀后 WebView 是新的会话，sessionStorage 活不下来。
   var ROUND_KEY = 'sotv_round';
@@ -278,6 +287,11 @@
     focusDefault();
     // #141：排版要等公式 / 图片渲染完再量；这一步不会改变正常字号下的显示
     window.setTimeout(fitQuiz, 0);
+    // 新题刚显示时丢弃残留连点；同一题的输入回填 / 重绘不重新计时。
+    if (renderedQuestionNonce !== round.nonce) {
+      renderedQuestionNonce = round.nonce;
+      questionInputAllowedAt = questionInputTime() + QUESTION_INPUT_GUARD_MS;
+    }
   }
   // #141：电视上系统字体被调大、或家长把「学习页字号」调大后，题干会被顶到页头后面、选项超出屏幕。
   // 先按原样量一次；放不下就换两档更紧凑的排版；还放不下就改成整页可滚动（舞台会跟着滚动）。
@@ -310,24 +324,19 @@
     button.setAttribute('data-action', 'submit'); button.textContent = value; parent.appendChild(button);
   }
   function choose(index) {
-    if (state.busy || !state.round) return;
+    // 保护期只丢弃选项选择和提交，朗读、输入等其他操作仍可使用。
+    if (state.busy || !state.round || questionInputBlocked()) return;
     if (state.round.question.type === 'multiple') {
       var pos = state.selected.indexOf(index);
       if (pos < 0) state.selected.push(index); else state.selected.splice(pos, 1);
       all('#qOptions [data-opt]').forEach(function (el) {
         el.classList.toggle('selected', state.selected.indexOf(+el.getAttribute('data-opt')) >= 0);
       });
-      // 多选：选完一项把焦点移到「确认所选答案」，让遥控器用户知道下一步要按提交
-      if (isTv()) {
-        var list = focusables();
-        for (var i = 0; i < list.length; i++) {
-          if (list[i].getAttribute('data-action') === 'submit') { setFocus(i); break; }
-        }
-      }
+      // 多选只切换选中状态，保留当前焦点，选完后由用户移到提交按钮。
     } else { state.selected = [index]; submit(); }
   }
   function submit() {
-    if (state.busy || !state.round) return;
+    if (state.busy || !state.round || questionInputBlocked()) return;
     var round = state.round, item = round.question, written = $('writtenAnswer');
     if (written ? (!written.value.trim() && !state.draft.drawing) : !state.selected.length) { toast('请先填写或选择答案'); return; }
     state.busy = true;
@@ -603,16 +612,31 @@
   function focusDefault() { if (isTv()) setFocus(0); }
   // 返回 true 表示焦点移动了；false 表示已到边缘（原生层据此判断“在最上方连按 ↑”打开家长入口）
   function move(dir) {
-    var list = focusables(), index = -1, best = -1, score = 1e12;
+    var list = focusables(), index = -1, best = -1, score = 1e12, bestAligned = false;
     list.forEach(function (el, i) { if (el.classList.contains('focused')) index = i; });
     if (index < 0) { if (!list.length) return false; setFocus(0); return true; }
-    var rect = list[index].getBoundingClientRect();
+    var current = list[index];
+    // 多选最后一行按下固定到提交；offsetTop 不受焦点放大和页面滚动影响。
+    if (dir === 'down' && state.screen === 'quiz' && state.round && state.round.question.type === 'multiple' && current.hasAttribute('data-opt')) {
+      var lastRow = true, submitIndex = -1;
+      list.forEach(function (el, i) {
+        if (el.hasAttribute('data-opt') && el.offsetTop > current.offsetTop) lastRow = false;
+        if (el.getAttribute('data-action') === 'submit') submitIndex = i;
+      });
+      if (lastRow && submitIndex >= 0) { setFocus(submitIndex); return true; }
+    }
+    var rect = current.getBoundingClientRect();
     list.forEach(function (el, i) {
       if (i === index) return;
       var r = el.getBoundingClientRect(), dx = r.left + r.width / 2 - rect.left - rect.width / 2, dy = r.top + r.height / 2 - rect.top - rect.height / 2;
       var primary = dir === 'left' ? -dx : dir === 'right' ? dx : dir === 'up' ? -dy : dy;
       var secondary = dir === 'left' || dir === 'right' ? Math.abs(dy) : Math.abs(dx);
-      if (primary > 8 && primary + secondary * 1.8 < score) { score = primary + secondary * 1.8; best = i; }
+      // 优先同一行 / 列的控件，避免下方横跨两列的提交按钮抢走左右导航。
+      var aligned = dir === 'left' || dir === 'right' ? r.top < rect.bottom && r.bottom > rect.top : r.left < rect.right && r.right > rect.left;
+      var distance = primary + secondary * 1.8;
+      if (primary > 8 && ((aligned && !bestAligned) || (aligned === bestAligned && distance < score))) {
+        score = distance; best = i; bestAligned = aligned;
+      }
     });
     if (best >= 0) { setFocus(best); return true; }
     return false;
