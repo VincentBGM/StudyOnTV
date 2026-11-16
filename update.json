@@ -1,21 +1,21 @@
 {
-  "version": "0.4.2",
-  "versionCode": 44,
+  "version": "0.4.3",
+  "versionCode": 45,
   "force": false,
-  "notes": "v0.4.2：朗读设置搬到「设置 → 朗读」，不用再翻到学习计划里找。设置页多了全局搜索，输入「朗读」「密码」「加时」「导入题目」就能直达对应页面和具体设置项。朗读内容可以选只读题目、题目和选项、题目选项连同答案；选「和答案」时，答案在作答后才读，不会提前说出来。",
-  "publishedAt": "2026-11-15T18:22:57.184Z",
+  "notes": "release: v0.4.3",
+  "publishedAt": "2026-11-16T12:11:39.478Z",
   "assets": {
     "tv": {
-      "name": "StudyOnTV-Android-TV-v0.4.2.apk",
-      "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.4.2/StudyOnTV-Android-TV-v0.4.2.apk",
-      "sha256": "5ee4cab848b9c1c8b9f134b9800cc5c4f8056f25d44722c039c032a71ebca1a1",
-      "size": 3457250
+      "name": "StudyOnTV-Android-TV-v0.4.3.apk",
+      "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.4.3/StudyOnTV-Android-TV-v0.4.3.apk",
+      "sha256": "598d6da81cff6dfe1f1fe862d096d3881089e74e58d5d3e3562c2426d982b930",
+      "size": 3458330
     },
     "mobile": {
-      "name": "StudyOnTV-Mobile-v0.4.2.apk",
-      "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.4.2/StudyOnTV-Mobile-v0.4.2.apk",
-      "sha256": "39ea9c32af3220a5818855766e376da8a6a2b943a07289d09f08db97f341fce7",
-      "size": 3459109
+      "name": "StudyOnTV-Mobile-v0.4.3.apk",
+      "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.4.3/StudyOnTV-Mobile-v0.4.3.apk",
+      "sha256": "92db0d9f0046456667f833f31ba807f410eceab0ba7446e9abdda9f6f851a71f",
+      "size": 3460490
     }
   }
 }
