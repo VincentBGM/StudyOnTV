@@ -317,13 +317,7 @@
       all('#qOptions [data-opt]').forEach(function (el) {
         el.classList.toggle('selected', state.selected.indexOf(+el.getAttribute('data-opt')) >= 0);
       });
-      // 多选：选完一项把焦点移到「确认所选答案」，让遥控器用户知道下一步要按提交
-      if (isTv()) {
-        var list = focusables();
-        for (var i = 0; i < list.length; i++) {
-          if (list[i].getAttribute('data-action') === 'submit') { setFocus(i); break; }
-        }
-      }
+      // 多选只切换选中状态，保留当前焦点，选完后由用户移到提交按钮。
     } else { state.selected = [index]; submit(); }
   }
   function submit() {
@@ -603,16 +597,31 @@
   function focusDefault() { if (isTv()) setFocus(0); }
   // 返回 true 表示焦点移动了；false 表示已到边缘（原生层据此判断“在最上方连按 ↑”打开家长入口）
   function move(dir) {
-    var list = focusables(), index = -1, best = -1, score = 1e12;
+    var list = focusables(), index = -1, best = -1, score = 1e12, bestAligned = false;
     list.forEach(function (el, i) { if (el.classList.contains('focused')) index = i; });
     if (index < 0) { if (!list.length) return false; setFocus(0); return true; }
-    var rect = list[index].getBoundingClientRect();
+    var current = list[index];
+    // 多选最后一行按下固定到提交；offsetTop 不受焦点放大和页面滚动影响。
+    if (dir === 'down' && state.screen === 'quiz' && state.round && state.round.question.type === 'multiple' && current.hasAttribute('data-opt')) {
+      var lastRow = true, submitIndex = -1;
+      list.forEach(function (el, i) {
+        if (el.hasAttribute('data-opt') && el.offsetTop > current.offsetTop) lastRow = false;
+        if (el.getAttribute('data-action') === 'submit') submitIndex = i;
+      });
+      if (lastRow && submitIndex >= 0) { setFocus(submitIndex); return true; }
+    }
+    var rect = current.getBoundingClientRect();
     list.forEach(function (el, i) {
       if (i === index) return;
       var r = el.getBoundingClientRect(), dx = r.left + r.width / 2 - rect.left - rect.width / 2, dy = r.top + r.height / 2 - rect.top - rect.height / 2;
       var primary = dir === 'left' ? -dx : dir === 'right' ? dx : dir === 'up' ? -dy : dy;
       var secondary = dir === 'left' || dir === 'right' ? Math.abs(dy) : Math.abs(dx);
-      if (primary > 8 && primary + secondary * 1.8 < score) { score = primary + secondary * 1.8; best = i; }
+      // 优先同一行 / 列的控件，避免下方横跨两列的提交按钮抢走左右导航。
+      var aligned = dir === 'left' || dir === 'right' ? r.top < rect.bottom && r.bottom > rect.top : r.left < rect.right && r.right > rect.left;
+      var distance = primary + secondary * 1.8;
+      if (primary > 8 && ((aligned && !bestAligned) || (aligned === bestAligned && distance < score))) {
+        score = distance; best = i; bestAligned = aligned;
+      }
     });
     if (best >= 0) { setFocus(best); return true; }
     return false;
