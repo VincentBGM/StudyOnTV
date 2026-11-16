@@ -40,6 +40,8 @@
   }
   function canVoice() { return !!(window.SOTVNative && typeof window.SOTVNative.answerVoice === 'function'); }
   function canRead() { return !!(window.SOTVNative && typeof window.SOTVNative.readInLanguage === 'function'); }
+  // 可用时段文案由设备按周计划算好（state.learning.scheduleText），页面不再自己拼旧版的 windowStart/windowEnd
+  function scheduleText() { return (state.learning && state.learning.scheduleText) || ''; }
   // 朗读内容由家长在「设置 → 朗读」里定：只读题干、题干加选项、再加答案（答案在作答后才读）
   function readScope() { return (state.speech && state.speech.readScope) || 'question'; }
   // 公式里的 $ 符号 TTS 会念出来，朗读前去掉
@@ -182,7 +184,8 @@
         var ov = state.learning.override;
         show('lock'); icon($('lockIcon'), 'check');
         $('lockTitle').textContent = ov && ov.mode === 'unlock' ? '家长已临时解锁' : '现在是自由时段';
-        $('lockDesc').textContent = ov && ov.mode === 'unlock' ? left2(ov.remainingSeconds) + '，到时自动恢复学习规则' : '每天 ' + state.config.windowStart + ' — ' + state.config.windowEnd + ' 需要先完成学习任务，其余时间可以直接使用';
+        $('lockDesc').textContent = ov && ov.mode === 'unlock' ? left2(ov.remainingSeconds) + '，到时自动恢复学习规则'
+          : (scheduleText() ? scheduleText() + ' 需要先完成学习任务，其余时间可以直接使用' : '其余时间可以直接使用');
         $('lockNote').textContent = '';
         $('lockActions').innerHTML = '<button class="btn btn-primary focusable" data-action="home">返回桌面</button>';
         focusDefault(); return;
@@ -502,7 +505,7 @@
       }
     }
     $('lockDesc').textContent = when ? '下次可用：' + when : reason === 'timeup' ? '完成学习任务后才能使用设备' : '现在暂不可用';
-    $('lockNote').textContent = state.config.allDay ? '' : '可用时段 ' + state.config.windowStart + ' — ' + state.config.windowEnd;
+    $('lockNote').textContent = state.config.allDay ? '' : (scheduleText() ? '可用时段 ' + scheduleText() : '');
     if (reason === 'timeup' && (state.children || []).length > 1) {
       // 多个孩子时用「开始学习 · 名字」代替「开始答题」：谁开始就记在谁头上
       $('lockActions').innerHTML = '';
