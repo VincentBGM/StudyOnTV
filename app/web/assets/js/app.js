@@ -4,6 +4,15 @@
   var all = function (selector) { return Array.prototype.slice.call(document.querySelectorAll(selector)); };
   var state = { screen: '', round: null, config: {}, learning: {}, busy: false, selected: [], version: 0, awaiting: false, reviewed: false, review: null, draft: null, unlockPending: false };
   var toastTimer, nextTimer, taps = 0, lastTap = 0, upTaps = 0, lastUpTap = 0;
+  var QUESTION_INPUT_GUARD_MS = 300;
+  var renderedQuestionNonce = null, questionInputAllowedAt = 0;
+  function questionInputTime() {
+    return window.performance && typeof window.performance.now === 'function' ? window.performance.now() : Date.now();
+  }
+  function questionInputBlocked() {
+    return state.screen === 'quiz' && state.round && state.round.nonce === renderedQuestionNonce &&
+      questionInputTime() < questionInputAllowedAt;
+  }
   // 断电 / 被系统清后台后恢复当前这组题。用 localStorage 而不是 sessionStorage：
   // 进程被杀后 WebView 是新的会话，sessionStorage 活不下来。
   var ROUND_KEY = 'sotv_round';
@@ -278,6 +287,11 @@
     focusDefault();
     // #141：排版要等公式 / 图片渲染完再量；这一步不会改变正常字号下的显示
     window.setTimeout(fitQuiz, 0);
+    // 新题刚显示时丢弃残留连点；同一题的输入回填 / 重绘不重新计时。
+    if (renderedQuestionNonce !== round.nonce) {
+      renderedQuestionNonce = round.nonce;
+      questionInputAllowedAt = questionInputTime() + QUESTION_INPUT_GUARD_MS;
+    }
   }
   // #141：电视上系统字体被调大、或家长把「学习页字号」调大后，题干会被顶到页头后面、选项超出屏幕。
   // 先按原样量一次；放不下就换两档更紧凑的排版；还放不下就改成整页可滚动（舞台会跟着滚动）。
@@ -310,7 +324,8 @@
     button.setAttribute('data-action', 'submit'); button.textContent = value; parent.appendChild(button);
   }
   function choose(index) {
-    if (state.busy || !state.round) return;
+    // 保护期只丢弃选项选择和提交，朗读、输入等其他操作仍可使用。
+    if (state.busy || !state.round || questionInputBlocked()) return;
     if (state.round.question.type === 'multiple') {
       var pos = state.selected.indexOf(index);
       if (pos < 0) state.selected.push(index); else state.selected.splice(pos, 1);
@@ -321,7 +336,7 @@
     } else { state.selected = [index]; submit(); }
   }
   function submit() {
-    if (state.busy || !state.round) return;
+    if (state.busy || !state.round || questionInputBlocked()) return;
     var round = state.round, item = round.question, written = $('writtenAnswer');
     if (written ? (!written.value.trim() && !state.draft.drawing) : !state.selected.length) { toast('请先填写或选择答案'); return; }
     state.busy = true;
