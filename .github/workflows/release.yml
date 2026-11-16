@@ -21,8 +21,10 @@ jobs:
         with:
           # 需要能 push commit（update.json），用 PAT 或默认 token + 写权限
           token: ${{ secrets.GITHUB_TOKEN }}
-          # 浅克隆会把附注标签压成轻量标签，%(contents:body) 就读不到发版说明，只剩 commit 正文
+          # 浅克隆会把附注标签压成轻量标签，%(contents) 就读不到发版说明，只剩 commit 正文
           fetch-depth: 0
+          # checkout@v4 默认不拉标签，只给触发的那一个 ref 建轻量标签；必须显式拉下来
+          fetch-tags: true
 
       - name: 设置 JDK 17
         uses: actions/setup-java@v4
@@ -90,11 +92,9 @@ jobs:
       # ── 5. 生成 update.json ──────────────────────────────────────────
       - name: 生成 update.json
         run: |
-          # 从 tag 的 annotation message 作为更新说明（git tag -a v0.x.x -m "说明"）
-          NOTES=$(git tag -l --format='%(contents:body)' "$TAG" 2>/dev/null || echo "")
-          if [ -z "$NOTES" ]; then
-            NOTES=$(git tag -l --format='%(contents:subject)' "$TAG" 2>/dev/null || echo "")
-          fi
+          # 从附注标签的完整说明作为更新说明（git tag -a v0.x.x -F 说明.txt）
+          # 用 %(contents) 取全文：标签说明没写空行时 %(contents:body) 是空的
+          NOTES=$(git tag -l --format='%(contents)' "$TAG" 2>/dev/null || echo "")
           node scripts/make-update-manifest.mjs release-artifacts --notes "$NOTES"
 
       # ── 6. commit update.json 回 main ────────────────────────────────
@@ -117,7 +117,7 @@ jobs:
       - name: 上传 Mobile APK 到蒲公英
         if: env.PGYER_API_KEY != ''
         run: |
-          NOTES=$(git tag -l --format='%(contents:body)' "$TAG" 2>/dev/null || echo "")
+          NOTES=$(git tag -l --format='%(contents)' "$TAG" 2>/dev/null || echo "")
           curl -s --fail-with-body \
             -F "_api_key=${PGYER_API_KEY}" \
             -F "file=@release-artifacts/StudyOnTV-Mobile-${TAG}.apk" \
@@ -128,7 +128,7 @@ jobs:
       - name: 上传 TV APK 到蒲公英
         if: env.PGYER_API_KEY != ''
         run: |
-          NOTES=$(git tag -l --format='%(contents:body)' "$TAG" 2>/dev/null || echo "")
+          NOTES=$(git tag -l --format='%(contents)' "$TAG" 2>/dev/null || echo "")
           curl -s --fail-with-body \
             -F "_api_key=${PGYER_API_KEY}" \
             -F "file=@release-artifacts/StudyOnTV-Android-TV-${TAG}.apk" \
