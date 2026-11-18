@@ -417,8 +417,9 @@ html:not(.tv-device) .btn.focused { transform:none;box-shadow:0 0 0 3px #f9e6ce;
 html:not(.tv-device) .written-answer { display:block;resize:vertical;min-height:170px;border:1px solid #e6ece0;border-radius:16px;padding:20px;font-size:20px;line-height:1.8;background:#fcfdfb;color:#2f3b31;font-family:inherit; }
 html:not(.tv-device) .written-answer:focus { outline:none;border-color:#e5bb87; }
 html:not(.tv-device) .answer-submit { margin:28px 0 0 auto;min-width:170px; }
-.input-tools { display:flex;width:100%;gap:12px;margin-top:8px; }
+.input-tools { display:-webkit-flex;display:flex;width:100%;margin-top:8px; }
 .input-tools .btn { margin-right:0; }
+.input-tools > * + * { margin-left:12px; }
 .drawing-preview { display:block;width:100%;max-height:300px;object-fit:contain;background:white;border:1px solid #e7ebe2;border-radius:12px;margin-top:16px; }
 html:not(.tv-device) .lock-wrap { min-height:65vh;padding:48px 16px; }
 html:not(.tv-device) .lock-title { color:#2e3a31;font-size:36px;font-weight:600; }
@@ -827,7 +828,8 @@ html:not(.tv-device) .feedback.is-wrong .btn, html:not(.tv-device) .btn-danger {
   html:not(.tv-device) .option { width: auto; margin: 0; min-height: 96px; padding: 22px 26px; font-size: 24px; }
   html:not(.tv-device) .option .letter { width: 44px; height: 44px; line-height: 44px; font-size: 17px; margin-right: 20px; }
   html:not(.tv-device) .written-answer { grid-column: 1 / -1; font-size: 22px; min-height: 200px; }
-  html:not(.tv-device) .input-tools, html:not(.tv-device) .answer-submit { grid-column: 1 / -1; }
+  html:not(.tv-device) .input-tools, html:not(.tv-device) .answer-submit,
+  #qOptions .drawing-preview, #qOptions [data-action="clear-drawing"] { grid-column: 1 / -1; }
   html:not(.tv-device) .btn { font-size: 18px; min-height: 56px; padding: 0 30px; }
   html:not(.tv-device) .feedback { padding: 22px max(40px, calc((100vw - 1100px) / 2)) 26px; }
   html:not(.tv-device) .fb-title { font-size: 24px; }

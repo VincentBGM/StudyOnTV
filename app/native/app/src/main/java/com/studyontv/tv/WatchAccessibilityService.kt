@@ -112,7 +112,10 @@ class WatchAccessibilityService : AccessibilityService() {
                 .any { it.resolveInfo.serviceInfo.packageName == context.packageName }
         } catch (_: Exception) { false }
         fun hasGate(): Boolean = instance?.gate?.isShowing == true
-        fun presentedGate(): Boolean = instance?.gate?.presenting() == true
+        fun presentedGate(now: Long = android.os.SystemClock.elapsedRealtime()): Boolean = instance?.gate?.presenting(now) == true
+        fun lastGateError(): String = instance?.gate?.let { g ->
+            g.lastError.ifEmpty { "accessibility gate attached but not visible kind=${g.lastErrorKind}" }
+        } ?: ""
         fun showNavigationBlocked(): Boolean = instance?.gate?.showNavigationBlocked() == true
         /** 只在需要拦 Home / 任务键时申请按键过滤（#162），由 GateService 每个 tick 同步 */
         fun setHomeFilter(enabled: Boolean) { instance?.setKeyFilter(enabled) }

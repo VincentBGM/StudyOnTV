@@ -49,27 +49,74 @@ jobs:
         working-directory: parent-ui
         run: npm ci
 
+      - name: 运行 parent-ui 测试与类型检查
+        working-directory: parent-ui
+        run: npm test
+
       - name: 构建 parent-ui（输出到 admin/）
         working-directory: parent-ui
         run: npm run build
 
       # ── 2. 解码签名密钥 ───────────────────────────────────────────────
       - name: 解码签名密钥
-        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: printf '%s' "$KEYSTORE_BASE64" | base64 -d > "${{ runner.temp }}/keystore.jks"
 
       - name: 写入 local.properties
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/keystore.jks
+          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.KEY_PASS }}
+          CRASH_ENDPOINT: ${{ secrets.CRASH_ENDPOINT }}
+          CRASH_TOKEN: ${{ secrets.CRASH_TOKEN }}
         run: |
-          cat > app/native/local.properties <<EOF
-          sdk.dir=$ANDROID_SDK_ROOT
-          KEYSTORE_PATH=${{ github.workspace }}/keystore.jks
-          KEYSTORE_PASS=${{ secrets.KEYSTORE_PASS }}
-          KEY_ALIAS=${{ secrets.KEY_ALIAS }}
-          KEY_PASS=${{ secrets.KEY_PASS }}
-          CRASH_ENDPOINT=${{ secrets.CRASH_ENDPOINT }}
-          CRASH_TOKEN=${{ secrets.CRASH_TOKEN }}
-          EOF
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
 
-      # ── 3. 构建 Android APK ───────────────────────────────────────────
+          def escape_prop(val: str) -> str:
+              out = []
+              for idx, ch in enumerate(val):
+                  if ch == "\\":
+                      out.append("\\\\")
+                  elif ch == "\t":
+                      out.append("\\t")
+                  elif ch == "\n":
+                      out.append("\\n")
+                  elif ch == "\r":
+                      out.append("\\r")
+                  elif ch == "\f":
+                      out.append("\\f")
+                  elif ch == " " and idx == 0:
+                      out.append("\\ ")
+                  elif ch in ":=#!":
+                      out.append("\\" + ch)
+                  elif ord(ch) < 0x20 or ord(ch) > 0x7E:
+                      out.append(f"\\u{ord(ch):04x}")
+                  else:
+                      out.append(ch)
+              return "".join(out)
+
+          entries = [
+              ("sdk.dir", os.environ.get("ANDROID_SDK_ROOT", "")),
+              ("KEYSTORE_PATH", os.environ.get("KEYSTORE_PATH", "")),
+              ("KEYSTORE_PASS", os.environ.get("KEYSTORE_PASS", "")),
+              ("KEY_ALIAS", os.environ.get("KEY_ALIAS", "")),
+              ("KEY_PASS", os.environ.get("KEY_PASS", "")),
+              ("CRASH_ENDPOINT", os.environ.get("CRASH_ENDPOINT", "")),
+              ("CRASH_TOKEN", os.environ.get("CRASH_TOKEN", "")),
+          ]
+          content = "".join(f"{k}={escape_prop(v)}\n" for k, v in entries)
+          Path("app/native/local.properties").write_text(content, encoding="ascii")
+          PY
+
+      # ── 3. 测试与构建 Android APK ─────────────────────────────────────
+      - name: 运行 Android 单元测试
+        working-directory: app/native
+        run: gradle testTvDebugUnitTest testMobileDebugUnitTest --no-daemon
+
       - name: 构建 TV Release APK
         working-directory: app/native
         run: gradle assembleTvRelease --no-daemon
@@ -97,21 +144,25 @@ jobs:
           NOTES=$(git tag -l --format='%(contents)' "$TAG" 2>/dev/null || echo "")
           node scripts/make-update-manifest.mjs release-artifacts --notes "$NOTES"
 
-      # ── 6. commit update.json 回 main ────────────────────────────────
-      - name: Commit update.json
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add update.json
-          git diff --staged --quiet || git commit -m "release: ${TAG} 更新清单 [skip ci]"
-          git push origin HEAD:main
-
-      # ── 7. 发布到 GitHub Release ─────────────────────────────────────
+      # ── 6. 发布到 GitHub Release（先上传资产，避免 update.json 指向 404）──
       - name: 发布到 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: release-artifacts/*.apk
           fail_on_unmatched_files: true
+
+      # ── 7. commit update.json 回 main ────────────────────────────────
+      - name: Commit update.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          cp update.json "$RUNNER_TEMP/update.json"
+          git fetch origin main
+          git checkout -B main origin/main
+          cp "$RUNNER_TEMP/update.json" update.json
+          git add update.json
+          git diff --staged --quiet || git commit -m "release: ${TAG} 更新清单 [skip ci]"
+          git push origin main
 
       # ── 8. 上传到蒲公英（备用下载）────────────────────────────────────
       - name: 上传 Mobile APK 到蒲公英
@@ -135,3 +186,8 @@ jobs:
             -F "buildUpdateDescription=${NOTES}" \
             "https://www.pgyer.com/apiv2/app/upload" | tee pgyer-tv.json
           cat pgyer-tv.json | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if d.get('code')==0 else 1)"
+
+      # ── 9. 清理签名密钥与临时配置 ────────────────────────────────────
+      - name: 清理签名密钥与 local.properties
+        if: always()
+        run: rm -f "${{ runner.temp }}/keystore.jks" app/native/local.properties

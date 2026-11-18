@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Field as UiField, FieldDescription, FieldGroup } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { api } from '@/api';
+import { api, resolveMediaUrl } from '@/api';
 import { ChoiceSelect, Field, labels, questionImages } from './shared';
 import { compressImageFile, formatImageHint } from './imageUtils';
 import RichStemEditor from './RichStemEditor';
@@ -55,8 +55,11 @@ export default function QuestionFormDialog({ initial, meta, onClose, onSaved }: 
     const current: string[] = form.images || [];
     const room = MAX_IMAGES - current.length;
     if (room <= 0) {
-      toast.error(`每道题最多支持 ${MAX_IMAGES} 张配图`);
+      toast.info(`每道题最多支持 ${MAX_IMAGES} 张配图`);
       return;
+    }
+    if (files.length > room) {
+      toast.info(`最多支持 ${MAX_IMAGES} 张配图，本次仅添加前 ${room} 张`);
     }
     const batch = files.slice(0, room);
     setUploading(true);
@@ -81,8 +84,8 @@ export default function QuestionFormDialog({ initial, meta, onClose, onSaved }: 
   function addImageUrl() {
     const u = urlInput.trim();
     if (!u) return;
-    if (!/^https?:\/\/.+/.test(u)) {
-      toast.error('请输入 http:// 或 https:// 开头的图片地址');
+    if (!/^(\/api\/media\/.+|https?:\/\/.+)/.test(u)) {
+      toast.error('请输入 http://、https:// 或 /api/media/ 开头的图片地址');
       return;
     }
     const current: string[] = form.images || [];
@@ -133,6 +136,15 @@ export default function QuestionFormDialog({ initial, meta, onClose, onSaved }: 
     });
   }
 
+  function handleDropImages(e: React.DragEvent) {
+    e.preventDefault();
+    if (uploading) return;
+    const list = Array.from(e.dataTransfer.files || []).filter(
+      f => f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name || ''),
+    );
+    if (list.length) void addImageFiles(list);
+  }
+
   function submit() {
     const f = form;
     const images: string[] = (f.images || []).filter(Boolean);
@@ -149,6 +161,7 @@ export default function QuestionFormDialog({ initial, meta, onClose, onSaved }: 
       audio: f.audio.trim(),
       language: f.language,
     };
+    if (f.enabled === false) q.enabled = false;
     if (!q.q) return toast.error('请填写题干');
     if (f.id) q.id = f.id;
     if (f.type === 'subjective') {
@@ -167,7 +180,7 @@ export default function QuestionFormDialog({ initial, meta, onClose, onSaved }: 
       if (optImgs.some(Boolean)) q.optionImages = optImgs;
       const correct = f.correct.filter((i: number) => i < q.a.length);
       if (!correct.length) return toast.error('请点击选项左侧的圆圈标记正确答案');
-      if (f.type === 'multiple') q.correctIndices = [...correct].sort();
+      if (f.type === 'multiple') q.correctIndices = [...correct].sort((a, b) => a - b);
       else q.k = correct[0];
     }
     save.mutate(q);
@@ -213,7 +226,7 @@ export default function QuestionFormDialog({ initial, meta, onClose, onSaved }: 
               />
             </UiField>
 
-            <UiField>
+            <UiField onDragOver={e => e.preventDefault()} onDrop={handleDropImages}>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <label className="text-sm font-medium">题目配图（可选，最多 {MAX_IMAGES} 张）</label>
                 <div className="flex items-center gap-1.5">
@@ -265,7 +278,7 @@ export default function QuestionFormDialog({ initial, meta, onClose, onSaved }: 
                 <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
                   {images.map((src, i) => (
                     <div key={i} className="group relative overflow-hidden rounded-md border bg-muted/30">
-                      <img src={src} alt={`配图 ${i + 1}`} className="h-24 w-full object-contain p-1" />
+                      <img src={resolveMediaUrl(src)} alt={`配图 ${i + 1}`} className="h-24 w-full object-contain p-1" />
                       <div className="flex items-center justify-between border-t bg-background/90 px-2 py-0.5 text-[11px] text-muted-foreground">
                         <span>{formatImageHint(src)}</span>
                         <button
@@ -284,12 +297,6 @@ export default function QuestionFormDialog({ initial, meta, onClose, onSaved }: 
                 <button
                   type="button"
                   onClick={() => fileRef.current?.click()}
-                  onDragOver={e => e.preventDefault()}
-                  onDrop={e => {
-                    e.preventDefault();
-                    const list = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith('image/'));
-                    if (list.length) void addImageFiles(list);
-                  }}
                   className="mt-1 flex w-full items-center justify-center gap-2 rounded-md border border-dashed py-3 text-xs text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
                 >
                   <ImagePlus className="size-4" />
@@ -382,7 +389,7 @@ export default function QuestionFormDialog({ initial, meta, onClose, onSaved }: 
                         </UiField>
                         {optImg && (
                           <div className="ms-11 flex items-center gap-2">
-                            <img src={optImg} alt={`选项 ${String.fromCharCode(65 + i)} 配图`} className="h-16 rounded border bg-muted/20 object-contain p-0.5" />
+                            <img src={resolveMediaUrl(optImg)} alt={`选项 ${String.fromCharCode(65 + i)} 配图`} className="h-16 rounded border bg-muted/20 object-contain p-0.5" />
                             <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive" onClick={() => clearOptionImage(i)}>
                               <X className="size-3.5" />移除配图
                             </Button>

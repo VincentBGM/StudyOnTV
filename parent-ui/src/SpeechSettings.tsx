@@ -215,7 +215,7 @@ export default function SpeechSettings({sessionId}:{sessionId:number}){
     {aliyunVisible&&<div className="grid gap-4 py-4 sm:grid-cols-2">{input('aliyunAppKey','阿里云 AppKey')}{input('aliyunAccessKeyId','阿里云 AccessKey ID')}{input('aliyunSecret','阿里云 AccessKey Secret',true)}{input('aliyunVoice','阿里云音色，例如 xiaoyun')}</div>}
     {hiddenErrors.length>0&&<div className="py-3"><FieldError>切回对应朗读通路后修正：{hiddenErrors.map(([key,message])=>`${labels[key]||key}：${message}`).join('；')}</FieldError></div>}
     {((!query.data&&query.isError)||saveError)&&<div className="flex flex-wrap items-center justify-between gap-2 py-3">
-     <FieldError>{!query.data?'无法读取朗读设置，password改。':saveError}</FieldError>
+     <FieldError>{!query.data?'无法读取朗读设置，暂时不能修改。':saveError}</FieldError>
      {/* 读不到设置时不能拿默认值去覆盖设备，只能重新拉；存失败则原样重试一次 */}
      <Button type="button" variant="outline" size="sm" onClick={()=>{setSaveError('');setFailedSignature('');if(!query.data)query.refetch();else save.mutate(form);}}>重试</Button>
     </div>}

@@ -70,7 +70,15 @@ object AnswerInput {
             requestId = ""
             screen = null
             target.clear()
-            if (result == null || view == null) return@post
+            GateService.refreshNow()
+            if (view == null) return@post
+            if (result == null) {
+                // 取消密码或作答输入时主动通知网页复位（否则锁定页的 unlockPending 会一直卡在等待态）
+                view.postDelayed({
+                    try { view.evaluateJavascript("window.SOTV_INPUT_CANCEL&&window.SOTV_INPUT_CANCEL()", null) } catch (_: Throwable) { }
+                }, 120)
+                return@post
+            }
             val token = UUID.randomUUID().toString()
             val payload = result.toString()
             var attempt = 0

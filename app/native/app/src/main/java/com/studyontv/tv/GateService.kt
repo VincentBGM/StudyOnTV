@@ -80,9 +80,25 @@ class GateService : Service() {
         val now = SystemClock.elapsedRealtime()
         val elapsed = now - lastTick
         lastTick = now
+        val config = DeviceRuntime.store.config()
+        if (!config.optBoolean("supervisionEnabled", true)) {
+            // 纯刷题背诵模式下不拦截其他应用、不锁系统设置、不静音，也不提醒缺少悬浮窗权限
+            wasUsing = false
+            freeNow = true
+            gateExpectedNow = false
+            beatWatch(false)
+            updateAnchor(false)
+            hideAll()
+            countdown.hide()
+            if (MediaPause.active) MediaPause.releaseAll(this)
+            AudioController.syncLearningActivity(true, false)
+            try { WatchAccessibilityService.setHomeFilter(false) } catch (_: Exception) { }
+            trackCapability(true, now)
+            return
+        }
         if (wasUsing) DeviceRuntime.learning.consume(elapsed)
         val canOverlay = OverlayAccess.canDraw(this)
-        updateAnchor(canOverlay && DeviceRuntime.store.config().optBoolean("backgroundAnchorEnabled", true))
+        updateAnchor(canOverlay && config.optBoolean("backgroundAnchorEnabled", true))
         if (!canOverlay) overlay.hide()
         val status = DeviceRuntime.learning.status()
         val free = status.optBoolean("free")
@@ -213,6 +229,13 @@ class GateService : Service() {
             Diag.warn("Gate", "overlay attached but never visible (attempt=$gateFailures) $lastGateError → hide and retry")
             // 用 hide 而不是 destroy：保留 WebView 供 60 秒内下次弹出复用，避免每几秒重建一次
             overlay.hide()
+        }
+        if (WatchAccessibilityService.hasGate() && !WatchAccessibilityService.presentedGate(now)) {
+            lastGateError = WatchAccessibilityService.lastGateError()
+            lastGateErrorAt = now
+            gateFailures++
+            Diag.warn("Gate", "accessibility gate attached but never visible (attempt=$gateFailures) $lastGateError → hide and retry")
+            WatchAccessibilityService.hideGate()
         }
         // 全屏学习页已经在前台 = 已经弹出来了（SDK<26 的老盒子走的就是这条路），
         // 不要再每 2 秒重复拉起 / 重复写日志。
@@ -363,9 +386,9 @@ class GateService : Service() {
         }
     }
 
-    /** Gate 是不是真的在屏幕上（悬浮层通过可见性校验 / 无障碍覆盖层 / 全屏学习页） */
+    /** Gate 是不是真的在屏幕上（悬浮层与无障碍覆盖层均须通过可见性校验，或全屏学习页在前台） */
     private fun gateShown(): Boolean = GatePresentation.gateVisible(
-        accessibilityGate = WatchAccessibilityService.hasGate(),
+        accessibilityGate = WatchAccessibilityService.presentedGate(),
         overlayPresenting = overlay.presenting(),
         learningActivity = Foreground.learningActivity() != null,
         gateExpected = gateExpectedNow,
@@ -575,7 +598,7 @@ class GateService : Service() {
         // 家长指定不计时的应用（屏保 / 网课）：不扣时长、不弹题，也不静音
         if (pkg in whitelistNow) return true
         if (!includeLauncher) return false
-        val launcher = packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0)?.activityInfo?.packageName
+        val launcher = launcherPackage()
         return pkg == launcher || Foreground.isLauncher(pkg)
     }
 
@@ -686,7 +709,7 @@ class GateService : Service() {
             val service = instance
             val now = SystemClock.elapsedRealtime()
             val overlay = service?.overlay
-            val accessibilityGate = WatchAccessibilityService.hasGate()
+            val accessibilityGate = WatchAccessibilityService.presentedGate(now)
             val overlayPresenting = overlay?.presenting(now) == true
             val learningActivity = Foreground.learningActivity() != null
             val gateExpected = service?.gateExpectedNow == true

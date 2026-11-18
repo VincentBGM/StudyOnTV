@@ -5,6 +5,8 @@ import java.io.ByteArrayOutputStream
 import java.io.EOFException
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.text.SimpleDateFormat
@@ -18,8 +20,8 @@ import javax.net.ssl.SSLSocketFactory
 /**
  * 免费内置微软 Edge 在线朗读（Read-Aloud WebSocket 协议，零第三方依赖）。
  *
- * 使用标准 TLS Socket + RFC 6455 WebSocket 握手与分帧，并按当前微软要求生成
- * `Sec-MS-GEC` 时间窗签名。合成结果返回 MP3 字节流，由 [SpeechReader] 缓存并播放。
+ * 使用带连接超时的底层 Socket + TLS 包装 + RFC 6455 WebSocket 握手与分片重组，
+ * 当电视机本地时钟失准导致 HTTP 403 时，自动读取响应头里的 `Date` 校准 `Sec-MS-GEC` 重试一次。
  */
 object EdgeTts {
     private const val HOST = "speech.platform.bing.com"
@@ -31,6 +33,9 @@ object EdgeTts {
     private const val ORIGIN = "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold"
     private const val OUTPUT_FORMAT = "audio-24khz-48kbitrate-mono-mp3"
     private const val MAX_AUDIO_BYTES = 4 * 1024 * 1024
+
+    /** 记录设备时钟与微软服务端时钟的偏差，电视未完成 NTP 校时时后续请求直接复用校准值。 */
+    @Volatile private var clockSkewMs = 0L
 
     val VOICES = listOf(
         "zh-CN-XiaoxiaoNeural",
@@ -54,28 +59,53 @@ object EdgeTts {
         }
     }
 
+    private class Handshake403Exception(message: String, val serverMillis: Long?) : IllegalStateException(message)
+
     fun synthesize(text: String, voice: String, language: String = "", rate: Double = 1.0): ByteArray {
         val chosenVoice = voice.trim().ifEmpty { defaultVoice(language) }
         val pct = (((rate.coerceIn(0.7, 1.5)) - 1.0) * 100.0).toInt()
         val rateStr = if (pct >= 0) "+${pct}%" else "${pct}%"
+        return try {
+            synthesizeOnce(text, chosenVoice, rateStr, System.currentTimeMillis() + clockSkewMs)
+        } catch (e: Handshake403Exception) {
+            val serverMs = e.serverMillis ?: throw IllegalStateException(e.message ?: "Edge 语音握手被拒绝（HTTP 403）")
+            clockSkewMs = serverMs - System.currentTimeMillis()
+            synthesizeOnce(text, chosenVoice, rateStr, serverMs)
+        }
+    }
+
+    private fun openTlsSocket(): SSLSocket {
+        val raw = Socket()
+        try {
+            raw.connect(InetSocketAddress(HOST, PORT), 10_000)
+            raw.soTimeout = 15_000
+            val sslFactory = SSLSocketFactory.getDefault() as SSLSocketFactory
+            return (sslFactory.createSocket(raw, HOST, PORT, true) as SSLSocket).apply {
+                soTimeout = 15_000
+                startHandshake()
+            }
+        } catch (e: Throwable) {
+            try { raw.close() } catch (_: Exception) { }
+            throw e
+        }
+    }
+
+    private fun synthesizeOnce(text: String, chosenVoice: String, rateStr: String, nowMillis: Long): ByteArray {
         val connId = UUID.randomUUID().toString().replace("-", "")
         val muid = randomHex(16)
         val path = "/consumer/speech/synthesize/readaloud/edge/v1" +
             "?TrustedClientToken=$TRUSTED_TOKEN" +
-            "&Sec-MS-GEC=${secMsGec()}" +
+            "&Sec-MS-GEC=${secMsGec(nowMillis)}" +
             "&Sec-MS-GEC-Version=1-$CHROMIUM_VERSION" +
             "&ConnectionId=$connId"
 
-        val socket = (SSLSocketFactory.getDefault().createSocket(HOST, PORT) as SSLSocket).apply {
-            soTimeout = 15_000
-            startHandshake()
-        }
+        val socket = openTlsSocket()
         try {
             val out = socket.outputStream
             val input = BufferedInputStream(socket.inputStream, 16 * 1024)
             handshake(input, out, path, muid)
 
-            val ts = isoTimestamp()
+            val ts = isoTimestamp(nowMillis)
             val configMsg = "X-Timestamp:$ts\r\n" +
                 "Content-Type:application/json; charset=utf-8\r\n" +
                 "Path:speech.config\r\n\r\n" +
@@ -93,15 +123,29 @@ object EdgeTts {
             sendTextFrame(out, ssmlMsg)
 
             val audio = ByteArrayOutputStream()
+            var closeDetail = ""
             while (true) {
-                val frame = readFrame(input) ?: break
-                when (frame.opcode) {
-                    0x1 -> { // text
-                        val msg = String(frame.payload, Charsets.UTF_8)
+                val message = readMessage(input) { control ->
+                    when (control.opcode) {
+                        0x8 -> {
+                            val (code, reason) = parseCloseInfo(control.payload)
+                            closeDetail = listOfNotNull(code?.let { "code=$it" }, reason.takeIf { it.isNotEmpty() }).joinToString(" ")
+                            false
+                        }
+                        0x9 -> {
+                            sendPongFrame(out, control.payload)
+                            true
+                        }
+                        else -> true
+                    }
+                } ?: break
+                when (message.opcode) {
+                    0x1 -> {
+                        val msg = String(message.payload, Charsets.UTF_8)
                         if (msg.contains("Path:turn.end")) break
                     }
-                    0x2 -> { // binary
-                        val data = frame.payload
+                    0x2 -> {
+                        val data = message.payload
                         if (data.size >= 2) {
                             val headerLen = ((data[0].toInt() and 0xFF) shl 8) or (data[1].toInt() and 0xFF)
                             val bodyStart = 2 + headerLen
@@ -111,13 +155,13 @@ object EdgeTts {
                             }
                         }
                     }
-                    0x8 -> break // close
-                    0x9 -> sendPongFrame(out, frame.payload)
                 }
             }
             sendCloseFrame(out)
             val result = audio.toByteArray()
-            require(result.isNotEmpty()) { "Edge 语音返回空音频" }
+            require(result.isNotEmpty()) {
+                if (closeDetail.isNotEmpty()) "Edge 语音返回空音频（$closeDetail）" else "Edge 语音返回空音频"
+            }
             return result
         } finally {
             try { socket.close() } catch (_: Exception) { }
@@ -134,9 +178,26 @@ object EdgeTts {
             .joinToString("") { "%02X".format(Locale.US, it) }
     }
 
+    /** 解析 HTTP 响应头中的 RFC 1123 时间（例如 `Wed, 18 Nov 2026 05:30:00 GMT`）。 */
+    internal fun parseHttpDate(value: String?): Long? {
+        val text = value?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val formats = listOf(
+            "EEE, dd MMM yyyy HH:mm:ss zzz",
+            "EEEE, dd-MMM-yy HH:mm:ss zzz",
+            "EEE MMM d HH:mm:ss yyyy"
+        )
+        for (pattern in formats) {
+            try {
+                val fmt = SimpleDateFormat(pattern, Locale.US).apply { timeZone = TimeZone.getTimeZone("GMT") }
+                return fmt.parse(text)?.time
+            } catch (_: Exception) { }
+        }
+        return null
+    }
+
     private fun handshake(input: BufferedInputStream, out: OutputStream, path: String, muid: String) {
         val keyBytes = ByteArray(16).also { SecureRandom().nextBytes(it) }
-        val wsKey = android.util.Base64.encodeToString(keyBytes, android.util.Base64.NO_WRAP)
+        val wsKey = MediaStore.encodeBase64(keyBytes)
         val req = buildString {
             append("GET ").append(path).append(" HTTP/1.1\r\n")
             append("Host: ").append(HOST).append("\r\n")
@@ -154,11 +215,17 @@ object EdgeTts {
         out.flush()
 
         val statusLine = readHttpLine(input)
-        require(statusLine.contains("101")) { "Edge 语音握手失败：$statusLine" }
+        val headers = HashMap<String, String>()
         while (true) {
             val line = readHttpLine(input)
             if (line.isEmpty()) break
+            val colon = line.indexOf(':')
+            if (colon > 0) headers[line.substring(0, colon).trim().lowercase(Locale.US)] = line.substring(colon + 1).trim()
         }
+        if (statusLine.contains("403")) {
+            throw Handshake403Exception("Edge 语音握手失败：$statusLine", parseHttpDate(headers["date"]))
+        }
+        require(statusLine.contains("101")) { "Edge 语音握手失败：$statusLine" }
     }
 
     private fun readHttpLine(input: BufferedInputStream): String {
@@ -176,25 +243,63 @@ object EdgeTts {
         }
     }
 
-    private class Frame(val opcode: Int, val payload: ByteArray)
+    internal class Frame(val fin: Boolean, val opcode: Int, val payload: ByteArray)
 
-    private fun readFrame(input: InputStream): Frame? {
+    internal fun parseCloseInfo(payload: ByteArray): Pair<Int?, String> {
+        if (payload.size < 2) return null to ""
+        val code = ((payload[0].toInt() and 0xFF) shl 8) or (payload[1].toInt() and 0xFF)
+        val reason = if (payload.size > 2) String(payload, 2, payload.size - 2, Charsets.UTF_8).trim() else ""
+        return code to reason
+    }
+
+    /**
+     * 读取并重组一条完整的 WebSocket 数据消息（支持 `FIN=0` + `opcode=0x0` 连续分片，
+     * 同时允许分片中途穿插 Ping / Close 等控制帧）。`onControl` 返回 `false` 表示收到关闭帧结束循环。
+     */
+    internal fun readMessage(input: InputStream, onControl: (Frame) -> Boolean = { it.opcode != 0x8 }): Frame? {
+        var fragOpcode = -1
+        val fragBuffer = ByteArrayOutputStream()
+        while (true) {
+            val frame = readFrame(input) ?: return null
+            if (frame.opcode >= 0x8) {
+                if (!onControl(frame)) return null
+                continue
+            }
+            if (frame.opcode != 0x0) {
+                require(fragOpcode == -1) { "Edge WebSocket 分片未结束又收到新消息帧" }
+                if (frame.fin) return frame
+                fragOpcode = frame.opcode
+                fragBuffer.reset()
+                fragBuffer.write(frame.payload)
+            } else {
+                require(fragOpcode != -1) { "Edge WebSocket 收到孤立的连续分片帧" }
+                require(fragBuffer.size() + frame.payload.size <= MAX_AUDIO_BYTES) { "Edge 帧过大" }
+                fragBuffer.write(frame.payload)
+                if (frame.fin) {
+                    return Frame(true, fragOpcode, fragBuffer.toByteArray())
+                }
+            }
+        }
+    }
+
+    internal fun readFrame(input: InputStream): Frame? {
         val first = input.read()
         if (first < 0) return null
         val second = input.read()
         if (second < 0) return null
+        val fin = (first and 0x80) != 0
         val opcode = first and 0x0F
         val masked = (second and 0x80) != 0
         var len = (second and 0x7F).toLong()
         if (len == 126L) {
             val b1 = input.read(); val b2 = input.read()
             if (b1 < 0 || b2 < 0) throw EOFException()
-            len = ((b1 shl 8) or b2).toLong()
+            len = (((b1 and 0xFF) shl 8) or (b2 and 0xFF)).toLong()
         } else if (len == 127L) {
             var v = 0L
             for (i in 0 until 8) {
                 val b = input.read(); if (b < 0) throw EOFException()
-                v = (v shl 8) or b.toLong()
+                v = (v shl 8) or (b.toLong() and 0xFFL)
             }
             len = v
         }
@@ -204,7 +309,7 @@ object EdgeTts {
         if (mask != null) {
             for (i in payload.indices) payload[i] = (payload[i].toInt() xor mask[i % 4].toInt()).toByte()
         }
-        return Frame(opcode, payload)
+        return Frame(fin, opcode, payload)
     }
 
     private fun readExact(input: InputStream, size: Int): ByteArray {
@@ -224,42 +329,52 @@ object EdgeTts {
         try { sendFrame(out, 0x8, ByteArray(0)) } catch (_: Exception) { }
     }
 
-    private fun sendFrame(out: OutputStream, opcode: Int, payload: ByteArray) {
-        val header = ByteArrayOutputStream()
-        header.write(0x80 or (opcode and 0x0F))
+    internal fun encodeFrame(opcode: Int, payload: ByteArray, masked: Boolean = true, fin: Boolean = true): ByteArray {
+        val out = ByteArrayOutputStream(payload.size + 14)
+        out.write((if (fin) 0x80 else 0x00) or (opcode and 0x0F))
+        val maskBit = if (masked) 0x80 else 0x00
         val len = payload.size
         when {
-            len <= 125 -> header.write(0x80 or len)
+            len <= 125 -> out.write(maskBit or len)
             len <= 65535 -> {
-                header.write(0x80 or 126)
-                header.write((len ushr 8) and 0xFF)
-                header.write(len and 0xFF)
+                out.write(maskBit or 126)
+                out.write((len ushr 8) and 0xFF)
+                out.write(len and 0xFF)
             }
             else -> {
-                header.write(0x80 or 127)
-                for (shift in 56 downTo 0 step 8) header.write(((len.toLong() ushr shift) and 0xFF).toInt())
+                out.write(maskBit or 127)
+                for (shift in 56 downTo 0 step 8) out.write(((len.toLong() ushr shift) and 0xFF).toInt())
             }
         }
-        val mask = ByteArray(4).also { SecureRandom().nextBytes(it) }
-        header.write(mask)
-        val masked = ByteArray(len) { i -> (payload[i].toInt() xor mask[i % 4].toInt()).toByte() }
+        if (masked) {
+            val mask = ByteArray(4).also { SecureRandom().nextBytes(it) }
+            out.write(mask)
+            val maskedPayload = ByteArray(len) { i -> (payload[i].toInt() xor mask[i % 4].toInt()).toByte() }
+            out.write(maskedPayload)
+        } else {
+            out.write(payload)
+        }
+        return out.toByteArray()
+    }
+
+    private fun sendFrame(out: OutputStream, opcode: Int, payload: ByteArray) {
+        val encoded = encodeFrame(opcode, payload, masked = true, fin = true)
         synchronized(out) {
-            out.write(header.toByteArray())
-            out.write(masked)
+            out.write(encoded)
             out.flush()
         }
     }
 
-    private fun isoTimestamp(): String {
+    private fun isoTimestamp(nowMillis: Long = System.currentTimeMillis()): String {
         val fmt = SimpleDateFormat("EEE MMM dd yyyy HH:mm:ss 'GMT+0000 (Coordinated Universal Time)'", Locale.US)
         fmt.timeZone = TimeZone.getTimeZone("UTC")
-        return fmt.format(Date())
+        return fmt.format(Date(nowMillis))
     }
 
     private fun randomHex(bytes: Int): String =
         ByteArray(bytes).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02X".format(Locale.US, it) }
 
-    private fun escapeXml(s: String): String = s
+    internal fun escapeXml(s: String): String = s
         .replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")

@@ -1,5 +1,7 @@
 import { useRef, useState } from 'react';
 import { Bold, Code, Eye, Highlighter, ImagePlus, Italic, List, Pencil, Sigma, Underline } from 'lucide-react';
+import { toast } from 'sonner';
+import { resolveMediaUrl } from '@/api';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { MathText } from './shared';
@@ -29,19 +31,44 @@ export default function RichStemEditor({
   const ref = useRef<HTMLTextAreaElement>(null);
   const [preview, setPreview] = useState(false);
 
+  function replaceRange(
+    el: HTMLTextAreaElement,
+    from: number,
+    to: number,
+    replacement: string,
+    selectStart: number,
+    selectEnd: number,
+  ) {
+    el.focus();
+    try {
+      if (typeof el.setRangeText === 'function') {
+        el.setRangeText(replacement, from, to, 'end');
+        el.setSelectionRange(selectStart, selectEnd);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        if (el.value !== value) onChange(el.value);
+        requestAnimationFrame(() => {
+          if (document.activeElement === el) el.setSelectionRange(selectStart, selectEnd);
+        });
+        return;
+      }
+    } catch {}
+    const next = value.slice(0, from) + replacement + value.slice(to);
+    onChange(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(selectStart, selectEnd);
+    });
+  }
+
   function wrap(before: string, after: string, fallback: string) {
     const el = ref.current;
     if (!el) return;
     const start = el.selectionStart ?? value.length;
     const end = el.selectionEnd ?? value.length;
     const selected = value.slice(start, end) || fallback;
-    const next = value.slice(0, start) + before + selected + after + value.slice(end);
-    onChange(next);
-    requestAnimationFrame(() => {
-      el.focus();
-      const s = start + before.length;
-      el.setSelectionRange(s, s + selected.length);
-    });
+    const replacement = before + selected + after;
+    const s = start + before.length;
+    replaceRange(el, start, end, replacement, s, s + selected.length);
   }
 
   function insertLinePrefix(prefix: string) {
@@ -49,17 +76,13 @@ export default function RichStemEditor({
     if (!el) return;
     const start = el.selectionStart ?? value.length;
     const end = el.selectionEnd ?? value.length;
-    const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+    const lineStart = start > 0 ? value.lastIndexOf('\n', start - 1) + 1 : 0;
     const lineEndIdx = value.indexOf('\n', end);
     const lineEnd = lineEndIdx < 0 ? value.length : lineEndIdx;
     const block = value.slice(lineStart, lineEnd);
     const lines = (block || '列表项').split('\n').map(l => (l.startsWith(prefix) ? l : prefix + l));
     const replaced = lines.join('\n');
-    onChange(value.slice(0, lineStart) + replaced + value.slice(lineEnd));
-    requestAnimationFrame(() => {
-      el.focus();
-      el.setSelectionRange(lineStart, lineStart + replaced.length);
-    });
+    replaceRange(el, lineStart, lineEnd, replaced, lineStart, lineStart + replaced.length);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -86,10 +109,16 @@ export default function RichStemEditor({
         if (file) files.push(file);
       }
     }
-    if (files.length) {
-      e.preventDefault();
-      onPasteImages(files);
+    if (!files.length) return;
+    if (!canAddImage) {
+      if (!e.clipboardData?.getData('text/plain')) {
+        e.preventDefault();
+        toast.info('配图数量已达上限或正在上传中');
+      }
+      return;
     }
+    e.preventDefault();
+    onPasteImages(files);
   }
 
   return (
@@ -154,7 +183,7 @@ export default function RichStemEditor({
           {images.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {images.map((src, i) => (
-                <img key={i} src={src} alt={`配图 ${i + 1}`} className="max-h-36 rounded-md border object-contain" />
+                <img key={i} src={resolveMediaUrl(src)} alt={`配图 ${i + 1}`} className="max-h-36 rounded-md border object-contain" />
               ))}
             </div>
           )}

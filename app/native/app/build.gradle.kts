@@ -7,7 +7,7 @@ plugins {
 
 val localProps = Properties().also { props ->
     val f = rootProject.file("local.properties")
-    if (f.exists()) props.load(f.inputStream())
+    if (f.exists()) f.inputStream().use { props.load(it) }
 }
 
 android {
@@ -19,8 +19,8 @@ android {
         minSdk = 21          // Android 5.0
         targetSdk = 34
         testInstrumentationRunner = "com.studyontv.tv.RegressionInstrumentation"
-        versionCode = 46
-        versionName = "0.4.4"
+        versionCode = 47
+        versionName = "0.5.0"
         // 带电视桌面的包在 desktop 这个 buildType 里改成 true
         buildConfigField("boolean", "DESKTOP", "false")
         // 崩溃上报的默认地址/令牌：从 local.properties 或环境变量注入（都不入库），
@@ -93,6 +93,11 @@ android {
 
     buildFeatures {
         buildConfig = true
+    }
+
+    testOptions {
+        // 让纯 JVM 单元测试碰到未调用的 Android SDK 空壳方法时返回默认值而非抛 RuntimeException("Stub!")
+        unitTests.isReturnDefaultValues = true
     }
 }
 

@@ -41,6 +41,8 @@ object SpeechReader {
 
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
+    /** 下一分段的预合成放到独立线程，绝不堵塞当前分段在 worker 上的 PCM 播放。 */
+    private val prefetchWorker = Executors.newSingleThreadExecutor()
     @Volatile private var generation = 0
     private var player: MediaPlayer? = null
     /**
@@ -56,9 +58,10 @@ object SpeechReader {
     private var system: TextToSpeech? = null
     private var ready = false
     private var pending: (() -> Unit)? = null
-    private var token = ""
-    private var tokenExpires = 0L
-    private var tokenKey = ""
+    private val tokenLock = Any()
+    @Volatile private var token = ""
+    @Volatile private var tokenExpires = 0L
+    @Volatile private var tokenKey = ""
     /** 最近一次朗读 / 播放的结果，供 speechStatus 桥与回归测试断言 */
     @Volatile private var last: JSONObject? = null
     @Volatile private var speaking = false
@@ -138,7 +141,7 @@ object SpeechReader {
         }
         if (input.optBoolean("clearKeys")) { next.remove("azureKey"); next.remove("aliyunSecret"); next.remove("deepseekKey") }
         store.set("speech_settings", next.toString())
-        token = ""; tokenExpires = 0
+        synchronized(tokenLock) { token = ""; tokenExpires = 0L; tokenKey = "" }
         synchronized(synthCache) { synthCache.clear() }
         return settings(store)
     }
@@ -618,29 +621,31 @@ object SpeechReader {
             try {
                 val bytes = synthWithCache(context, mode, config, language, parts[index])
                 if (index + 1 < parts.size && mode in listOf("edge", "deepseek")) {
-                    worker.execute {
+                    prefetchWorker.execute {
                         if (generation == request) try { synthWithCache(context, mode, config, language, parts[index + 1]) } catch (_: Exception) { }
                     }
                 }
-                // DeepSeek 返回 WAV：自己解析 PCM 用 AudioTrack 播放，绕开华为等设备上
-                // MediaPlayer 的 "Prepare failed.: status=0x1"（用户反馈：扣费了却读不出来）
+                // DeepSeek 返回 WAV：自己解析 PCM 用 AudioTrack 直接在内存播放，不落临时文件，
+                // 绕开华为等设备上 MediaPlayer 的 "Prepare failed.: status=0x1"
                 val pcm = if (mode == "deepseek") WavAudio.parse(bytes) else null
                 if (mode == "deepseek" && pcm == null && !WavAudio.isWave(bytes)) {
                     throw IllegalStateException("云端朗读返回的不是音频：${bodySnippet(bytes)}")
                 }
-                val file = File.createTempFile("reading-", if (mode == "deepseek") ".wav" else ".mp3", context.cacheDir)
-                file.writeBytes(bytes)
-                main.post {
-                    if (generation != request) { file.delete(); return@post }
-                    if (pcm != null) {
-                        file.delete()
+                if (pcm != null) {
+                    main.post {
+                        if (generation != request) return@post
                         playPcm(pcm, request,
                             onDone = { cloudPart(context, parts, index + 1, language, config, mode, request) },
                             onError = {
                                 systemRead(context, parts.drop(index).joinToString(""), language, request, mode)
                             })
-                        return@post
                     }
+                    return@execute
+                }
+                val file = File.createTempFile("reading-", if (mode == "deepseek") ".wav" else ".mp3", context.cacheDir)
+                file.writeBytes(bytes)
+                main.post {
+                    if (generation != request) { file.delete(); return@post }
                     try {
                         audioFile = file
                         player = MediaPlayer().apply {
@@ -705,10 +710,10 @@ object SpeechReader {
                     if (written <= 0) break
                     offset += written
                 }
-                // 等缓冲区里的最后一段播完再进入下一句；上限按音频时长算，个别设备读不到播放头也不会卡住
-                val durationMs = pcm.frames * 1000 / pcm.sampleRate.coerceAtLeast(1)
-                val deadline = System.currentTimeMillis() + durationMs + 3000
-                while (request == generation && created.playbackHeadPosition.toLong() < pcm.frames &&
+                // 等缓冲区里的最后一段播完再进入下一句；playbackHeadPosition 是无符号 32 位帧计数
+                val durationMs = pcm.frames * 1000L / pcm.sampleRate.coerceAtLeast(1)
+                val deadline = System.currentTimeMillis() + durationMs + 3000L
+                while (request == generation && (created.playbackHeadPosition.toLong() and 0xFFFFFFFFL) < pcm.frames &&
                     System.currentTimeMillis() < deadline) {
                     Thread.sleep(20)
                 }
@@ -759,18 +764,21 @@ object SpeechReader {
     private fun encode(value: String) = URLEncoder.encode(value, "UTF-8").replace("+", "%20").replace("*", "%2A").replace("%7E", "~")
     private fun aliyun(config: JSONObject, text: String): ByteArray {
         val identity = config.getString("aliyunAccessKeyId") + config.getString("aliyunSecret")
-        if (token.isEmpty() || identity != tokenKey || System.currentTimeMillis() / 1000 >= tokenExpires - 120) {
-            val timestamp = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }.format(java.util.Date())
-            val parameters = sortedMapOf("AccessKeyId" to config.getString("aliyunAccessKeyId"), "Action" to "CreateToken", "Format" to "JSON",
-                "Version" to "2019-02-28", "SignatureMethod" to "HMAC-SHA1", "SignatureVersion" to "1.0", "SignatureNonce" to UUID.randomUUID().toString(), "Timestamp" to timestamp)
-            val query = parameters.entries.joinToString("&") { encode(it.key) + "=" + encode(it.value) }
-            val mac = javax.crypto.Mac.getInstance("HmacSHA1")
-            mac.init(javax.crypto.spec.SecretKeySpec((config.getString("aliyunSecret") + "&").toByteArray(), "HmacSHA1"))
-            val signature = android.util.Base64.encodeToString(mac.doFinal(("GET&%2F&" + encode(query)).toByteArray()), android.util.Base64.NO_WRAP)
-            val result = JSONObject(String(request("https://nls-meta.cn-shanghai.aliyuncs.com/?$query&Signature=${encode(signature)}"), Charsets.UTF_8)).getJSONObject("Token")
-            token = result.getString("Id"); tokenExpires = result.getLong("ExpireTime"); tokenKey = identity
+        val currentToken = synchronized(tokenLock) {
+            if (token.isEmpty() || identity != tokenKey || System.currentTimeMillis() / 1000 >= tokenExpires - 120) {
+                val timestamp = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }.format(java.util.Date())
+                val parameters = sortedMapOf("AccessKeyId" to config.getString("aliyunAccessKeyId"), "Action" to "CreateToken", "Format" to "JSON",
+                    "Version" to "2019-02-28", "SignatureMethod" to "HMAC-SHA1", "SignatureVersion" to "1.0", "SignatureNonce" to UUID.randomUUID().toString(), "Timestamp" to timestamp)
+                val query = parameters.entries.joinToString("&") { encode(it.key) + "=" + encode(it.value) }
+                val mac = javax.crypto.Mac.getInstance("HmacSHA1")
+                mac.init(javax.crypto.spec.SecretKeySpec((config.getString("aliyunSecret") + "&").toByteArray(), "HmacSHA1"))
+                val signature = MediaStore.encodeBase64(mac.doFinal(("GET&%2F&" + encode(query)).toByteArray()))
+                val result = JSONObject(String(request("https://nls-meta.cn-shanghai.aliyuncs.com/?$query&Signature=${encode(signature)}"), Charsets.UTF_8)).getJSONObject("Token")
+                token = result.getString("Id"); tokenExpires = result.getLong("ExpireTime"); tokenKey = identity
+            }
+            token
         }
         val voice = config.optString("aliyunVoice").ifBlank { "xiaoyun" }
-        return request("https://nls-gateway-cn-shanghai.aliyuncs.com/stream/v1/tts?appkey=${encode(config.getString("aliyunAppKey"))}&token=${encode(token)}&text=${encode(text)}&format=mp3&sample_rate=16000&voice=${encode(voice)}")
+        return request("https://nls-gateway-cn-shanghai.aliyuncs.com/stream/v1/tts?appkey=${encode(config.getString("aliyunAppKey"))}&token=${encode(currentToken)}&text=${encode(text)}&format=mp3&sample_rate=16000&voice=${encode(voice)}")
     }
 }

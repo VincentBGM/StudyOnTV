@@ -4,6 +4,8 @@ import {Textarea} from '@/components/ui/textarea';
 import {Field as UiField,FieldLabel} from '@/components/ui/field';
 import {Select,SelectContent,SelectItem,SelectTrigger,SelectValue} from '@/components/ui/select';
 
+const VALID_MEDIA_RE=/^(\/api\/media\/|https?:\/\/|data:image\/)/;
+
 /** 题干 / 答案里的富文本与 $...$ 公式交给共享渲染器处理 */
 export function MathText({text,className='',plain=false}:{text:string,className?:string,plain?:boolean}){
  const ref=useRef<HTMLDivElement>(null);
@@ -20,26 +22,34 @@ export function MathText({text,className='',plain=false}:{text:string,className?
  return <div ref={ref} className={className}/>;
 }
 
-/** 提取题目全部有效配图（兼容单图 image 与多图 images） */
+/** 提取题目全部有效配图（兼容单图 image、多图 images 与设备端 /api/media/ 本地路径） */
 export function questionImages(q:any):string[]{
  if(!q)return [];
  const out:string[]=[];
  const seen=new Set<string>();
  const push=(u:any)=>{
   const s=typeof u==='string'?u.trim():'';
-  if(s&&/^(https?:\/\/|data:image\/)/.test(s)&&!seen.has(s)){seen.add(s);out.push(s);}
+  if(s&&VALID_MEDIA_RE.test(s)&&!seen.has(s)){seen.add(s);out.push(s);}
  };
  if(Array.isArray(q.images))q.images.forEach(push);
  push(q.image);
  return out;
 }
 
-/** 题目详情、题库列表共用的答案文本 */
+/** 题目详情、题库列表共用的答案文本（支持纯图片选项显示「选项 X」） */
 export function answerOf(q:any){
+ if(!q)return '';
  if(q.type==='subjective')return q.modelAnswer||'由家长批改';
  if(q.type==='text')return(q.answers||[]).join(' / ');
  const a=q.type==='boolean'?['正确','错误']:(q.a||[]);
- return q.type==='multiple'?(q.correctIndices||[]).map((i:number)=>a[i]).join('、'):a[q.k]||'';
+ const fmtOpt=(i:number)=>{
+  const text=String(a[i]??'').trim();
+  if(text)return text;
+  if(Array.isArray(q.optionImages)&&q.optionImages[i])return `选项 ${String.fromCharCode(65+i)}（配图）`;
+  return `选项 ${String.fromCharCode(65+i)}`;
+ };
+ if(q.type==='multiple')return(q.correctIndices||[]).map((i:number)=>fmtOpt(i)).join('、');
+ return typeof q.k==='number'&&q.k>=0&&q.k<a.length?fmtOpt(q.k):(a[q.k]||'');
 }
 
 export function download(data:any,name:string){
