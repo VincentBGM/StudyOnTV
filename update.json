@@ -1,21 +1,21 @@
 {
-  "version": "0.4.3",
-  "versionCode": 45,
+  "version": "0.4.4",
+  "versionCode": 46,
   "force": false,
-  "notes": "学习页「可用时段」提示改按周计划显示\n- 以前不管家长设置什么时段，提示都停在默认的 18:30–20:00\n- 现在按实际周计划显示，例如「周一至周五 18:30–20:30，周六周日 09:00–20:00」；全天模式显示「全天可用」\n- 新题增加 300 毫秒防误提交保护，避免刚出现就被确认\n- 多选题保留已选项焦点，提交后的导航更顺",
-  "publishedAt": "2026-11-16T12:11:39.478Z",
+  "notes": "release: v0.4.4",
+  "publishedAt": "2026-11-18T02:24:11.678Z",
   "assets": {
     "tv": {
-      "name": "StudyOnTV-Android-TV-v0.4.3.apk",
-      "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.4.3/StudyOnTV-Android-TV-v0.4.3.apk",
-      "sha256": "598d6da81cff6dfe1f1fe862d096d3881089e74e58d5d3e3562c2426d982b930",
-      "size": 3458330
+      "name": "StudyOnTV-Android-TV-v0.4.4.apk",
+      "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.4.4/StudyOnTV-Android-TV-v0.4.4.apk",
+      "sha256": "d4e61209e6f877eec849a439daa78b74b3d59960942c90f92551603c9c13da84",
+      "size": 3472642
     },
     "mobile": {
-      "name": "StudyOnTV-Mobile-v0.4.3.apk",
-      "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.4.3/StudyOnTV-Mobile-v0.4.3.apk",
-      "sha256": "92db0d9f0046456667f833f31ba807f410eceab0ba7446e9abdda9f6f851a71f",
-      "size": 3460490
+      "name": "StudyOnTV-Mobile-v0.4.4.apk",
+      "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.4.4/StudyOnTV-Mobile-v0.4.4.apk",
+      "sha256": "b327e102c05c6c3f649006da9c2f7c0fac2440321af946602ce63d3a5cc688dd",
+      "size": 3474488
     }
   }
 }
