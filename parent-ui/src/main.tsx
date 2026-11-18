@@ -17,10 +17,7 @@ import {Tabs,TabsContent,TabsList,TabsTrigger} from '@/components/ui/tabs';
 import {Sidebar,SidebarContent,SidebarFooter,SidebarGroup,SidebarGroupLabel,SidebarHeader,SidebarInset,SidebarMenu,SidebarMenuBadge,SidebarMenuButton,SidebarMenuItem,SidebarProvider,SidebarRail,SidebarTrigger,useSidebar} from '@/components/ui/sidebar';
 import {DropdownMenu,DropdownMenuContent,DropdownMenuItem,DropdownMenuLabel,DropdownMenuSeparator,DropdownMenuTrigger,DropdownMenuRadioGroup,DropdownMenuRadioItem} from '@/components/ui/dropdown-menu';
 import {api,getHost,setHost,setToken,enablePreview} from './api';
-import RulesPage from './RulesPage';
 import RemotePage from './RemotePage';
-import QuestionBank from './QuestionBank';
-import GradingPage from './GradingPage';
 import DevicePanel from './DevicePanel';
 import SpeechSettings from './SpeechSettings';
 import KeepAlivePanel from './KeepAlivePanel';
@@ -30,6 +27,9 @@ import ChildrenPanel from './ChildrenPanel';
 import FeedbackPanel from './FeedbackPanel';
 import InstallPrompt from './InstallPrompt';
 import {useIsMobile} from './hooks/use-mobile';
+const RulesPage=lazy(()=>import('./RulesPage'));
+const QuestionBank=lazy(()=>import('./QuestionBank'));
+const GradingPage=lazy(()=>import('./GradingPage'));
 const RecordsPage=lazy(()=>import('./RecordsPage'));
 import './styles.css';
 
@@ -249,10 +249,12 @@ function Dashboard({sessionId,logout,theme}:{sessionId:number,logout:()=>void,th
     <div className={page==='remote'?'hidden':'mb-4 flex items-end justify-between gap-4 border-b pb-4'}><h1 className="text-2xl font-semibold tracking-tight">{current.title}</h1><p className="hidden shrink-0 text-xs text-muted-foreground sm:block">{current.description}</p></div>
     {state.error&&<Alert variant="destructive" className="mb-4"><AlertCircle/><AlertDescription>暂未能刷新数据，请确认设备仍在同一局域网。</AlertDescription></Alert>}
     {page==='remote'&&<RemotePage state={state.data} sessionId={sessionId}/>}
-    {page==='rules'&&<RulesPage state={state.data} sessionId={sessionId}/>}
-    {page==='bank'&&<QuestionBank sessionId={sessionId}/>}
-    {page==='grading'&&<GradingPage sessionId={sessionId}/>}
-    {page==='records'&&<Suspense fallback={<div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin"/>正在读取记录…</div>}><RecordsPage sessionId={sessionId}/></Suspense>}
+    <Suspense fallback={<div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin"/>正在加载…</div>}>
+     {page==='rules'&&<RulesPage state={state.data} sessionId={sessionId}/>}
+     {page==='bank'&&<QuestionBank sessionId={sessionId}/>}
+     {page==='grading'&&<GradingPage sessionId={sessionId}/>}
+     {page==='records'&&<RecordsPage sessionId={sessionId}/>}
+    </Suspense>
     {page==='settings'&&<SettingsPage section={section} go={go} sessionId={sessionId} state={state.data} logout={logout}/>}
    </main>
   </SidebarInset>

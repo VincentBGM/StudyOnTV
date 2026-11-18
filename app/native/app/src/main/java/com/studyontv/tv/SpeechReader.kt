@@ -87,6 +87,7 @@ object SpeechReader {
             if (!has("mode")) put("mode", "system")
             if (!has("readLanguage")) put("readLanguage", "")
             if (!has("edgeVoice")) put("edgeVoice", "")
+            if (!has("speechRate")) put("speechRate", 1.0)
             if (!has("deepseekVoice")) put("deepseekVoice", "stella")
             if (!has("recognizeMode")) put("recognizeMode", "system")
             if (optString("readScope") !in READ_SCOPES) put("readScope", "question")
@@ -123,6 +124,11 @@ object SpeechReader {
             require(edgeVoice.isEmpty() || edgeVoice in EdgeTts.VOICES) { "不支持的 Edge 音色" }
             next.put("edgeVoice", edgeVoice)
         }
+        if (input.has("speechRate")) {
+            val rate = input.optDouble("speechRate", 1.0)
+            require(rate.isFinite() && rate in 0.7..1.5) { "朗读语速需在 0.7 到 1.5 之间" }
+            next.put("speechRate", rate)
+        }
         for (key in listOf("azureRegion", "azureVoice", "aliyunAppKey", "aliyunAccessKeyId", "aliyunVoice")) if (input.has(key)) {
             require(input.getString(key).length <= 200); next.put(key, input.getString(key).trim())
         }
@@ -151,7 +157,8 @@ object SpeechReader {
                 deepseekKey(config).isNotEmpty() -> "deepseek"
                 config.optString("azureKey").isNotEmpty() -> "azure"
                 config.optString("aliyunSecret").isNotEmpty() -> "aliyun"
-                else -> "system"
+                TtsProbe.defaultEngine(app).isNotEmpty() -> "system"
+                else -> "edge"
             } else mode
             // 系统 TTS 使用 QUEUE_FLUSH 覆盖旧播报，避免在部分固件（如 OPPO）上连续调用 system.stop() + speak() 导致后续题目静默丢弃
             stopNow(stopSystem = chosen != "system")
@@ -384,6 +391,10 @@ object SpeechReader {
             return
         }
         try { engine.setAudioAttributes(attributes) } catch (_: Exception) { }
+        try {
+            val rate = currentSettings().optDouble("speechRate", 1.0).takeIf { it.isFinite() }?.coerceIn(0.7, 1.5) ?: 1.0
+            engine.setSpeechRate(rate.toFloat())
+        } catch (_: Exception) { }
         currentText = text; currentLanguage = plan.language; retriedDefault = plan.degraded
         // 按句子攒到 180 字再排队朗读：电视内置 TTS 引擎读几千字的长句常常中途断掉（用户反馈「朗读不完整」），
         // 拆成短句用 QUEUE_ADD 串起来更稳，句间停顿也更自然。
@@ -537,27 +548,79 @@ object SpeechReader {
         } finally { connection.disconnect() }
     }
 
+    private val diskLock = Any()
+    private fun diskFile(context: Context, cacheKey: String): File? {
+        if (cacheKey.isEmpty()) return null
+        val dir = File(context.cacheDir, "tts_cache").apply { if (!exists()) mkdirs() }
+        val hash = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(cacheKey.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        return File(dir, "$hash.bin")
+    }
+    private fun readDiskCache(context: Context, cacheKey: String): ByteArray? = synchronized(diskLock) {
+        val f = diskFile(context, cacheKey) ?: return null
+        if (!f.exists()) return null
+        f.setLastModified(System.currentTimeMillis())
+        return try { f.readBytes() } catch (_: Exception) { null }
+    }
+    private fun writeDiskCache(context: Context, cacheKey: String, bytes: ByteArray) = synchronized(diskLock) {
+        if (cacheKey.isEmpty() || bytes.size > 512 * 1024) return
+        val f = diskFile(context, cacheKey) ?: return
+        try {
+            f.writeBytes(bytes)
+            val dir = f.parentFile ?: return
+            val files = dir.listFiles() ?: return
+            var total = files.sumOf { it.length() }
+            if (total > 20L * 1024 * 1024) {
+                for (old in files.sortedBy { it.lastModified() }) {
+                    if (total <= 16L * 1024 * 1024) break
+                    val len = old.length()
+                    if (old.delete()) total -= len
+                }
+            }
+        } catch (_: Exception) { }
+    }
+    private fun cacheKeyFor(mode: String, config: JSONObject, language: String, part: String): String {
+        val rate = config.optDouble("speechRate", 1.0).takeIf { it.isFinite() }?.coerceIn(0.7, 1.5) ?: 1.0
+        return when (mode) {
+            "deepseek" -> "${deepseekKey(config).hashCode()}|" + config.optString("deepseekVoice") + "|" + part
+            "edge" -> "edge|${config.optString("edgeVoice")}|$language|$rate|$part"
+            else -> ""
+        }
+    }
+    private fun synthWithCache(context: Context, mode: String, config: JSONObject, language: String, part: String): ByteArray {
+        val cacheKey = cacheKeyFor(mode, config, language, part)
+        if (cacheKey.isNotEmpty()) {
+            synchronized(synthCache) { synthCache[cacheKey] }?.let { return it }
+            readDiskCache(context, cacheKey)?.let {
+                synchronized(synthCache) { synthCache[cacheKey] = it }
+                return it
+            }
+        }
+        val rate = config.optDouble("speechRate", 1.0).takeIf { it.isFinite() }?.coerceIn(0.7, 1.5) ?: 1.0
+        val bytes = when (mode) {
+            "deepseek" -> deepseekBytes(config, part, language)
+            "edge" -> EdgeTts.synthesize(part, config.optString("edgeVoice"), language, rate)
+            "azure" -> azure(config, part, language)
+            else -> aliyun(config, part)
+        }
+        if (cacheKey.isNotEmpty() && bytes.size <= 512 * 1024) {
+            synchronized(synthCache) { synthCache[cacheKey] = bytes }
+            writeDiskCache(context, cacheKey, bytes)
+        }
+        return bytes
+    }
+
     private fun cloudPart(context: Context, parts: List<String>, index: Int, language: String, config: JSONObject, mode: String, request: Int) {
         if (index >= parts.size || generation != request) return
         worker.execute {
             if (generation != request) return@execute
             try {
-                // 同一段文字 + 音色 + Key 复用上次的音频：题目重绘会再次触发自动朗读，重复合成会重复计费
-                val cacheKey = when (mode) {
-                    "deepseek" -> "${deepseekKey(config).hashCode()}|" + config.optString("deepseekVoice") + "|" + parts[index]
-                    "edge" -> "edge|${config.optString("edgeVoice")}|$language|${parts[index]}"
-                    else -> ""
-                }
-                val cached = if (cacheKey.isEmpty()) null else synchronized(synthCache) { synthCache[cacheKey] }
-                val bytes = cached ?: when (mode) {
-                    "deepseek" -> deepseekBytes(config, parts[index], language).also {
-                        if (cacheKey.isNotEmpty() && it.size <= 512 * 1024) synchronized(synthCache) { synthCache[cacheKey] = it }
+                val bytes = synthWithCache(context, mode, config, language, parts[index])
+                if (index + 1 < parts.size && mode in listOf("edge", "deepseek")) {
+                    worker.execute {
+                        if (generation == request) try { synthWithCache(context, mode, config, language, parts[index + 1]) } catch (_: Exception) { }
                     }
-                    "edge" -> EdgeTts.synthesize(parts[index], config.optString("edgeVoice"), language).also {
-                        if (cacheKey.isNotEmpty() && it.size <= 512 * 1024) synchronized(synthCache) { synthCache[cacheKey] = it }
-                    }
-                    "azure" -> azure(config, parts[index], language)
-                    else -> aliyun(config, parts[index])
                 }
                 // DeepSeek 返回 WAV：自己解析 PCM 用 AudioTrack 播放，绕开华为等设备上
                 // MediaPlayer 的 "Prepare failed.: status=0x1"（用户反馈：扣费了却读不出来）

@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Copy,
+  Image as ImageIcon,
   Pencil,
   Plus,
   Search,
@@ -17,7 +18,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { FieldDescription } from '@/components/ui/field';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Toolbar, ToolbarGroup, ToolbarSeparator } from '@/components/ui/toolbar';
-import { Count, MathText, Stars, answerOf, dot, labels } from './shared';
+import { Count, MathText, Stars, answerOf, dot, labels, questionImages } from './shared';
 
 type Props = {
   items: any[];
@@ -188,7 +189,8 @@ export default function QuestionList(props: Props) {
                 <TableCell className="max-w-0 px-3">
                   <div className="flex min-w-0 items-center gap-2">
                     <span className={'size-1.5 shrink-0 rounded-full ' + (dot[q.type] || dot.single)} />
-                    <MathText text={q.q} className="truncate" />
+                    <MathText text={q.q} plain className="truncate" />
+                    {questionImages(q).length > 0 && <ImageIcon className="size-3.5 shrink-0 text-muted-foreground" aria-label="含配图" />}
                   </div>
                 </TableCell>
                 <TableCell className="px-3">
@@ -258,7 +260,7 @@ export default function QuestionList(props: Props) {
                 </Button>
               </ToolbarGroup>
             </Toolbar>
-            <MathText text={q.q} className="text-sm font-medium leading-6" />
+            <MathText text={q.q} plain className="text-sm font-medium leading-6" />
             <MathText text={'答案：' + answerOf(q)} className="truncate text-xs text-muted-foreground" />
             <Toolbar className="gap-1">
               <ToolbarGroup>

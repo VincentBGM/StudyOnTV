@@ -19,11 +19,12 @@ const modeLabels:Record<string,string>={system:'本地系统语音',edge:'微软
 const modeHints:Record<string,string>={
  system:'不需要网络，但电视可能没装中文语音包；读不出声音时点下面的「检测本地语音」',
  edge:'免费在线朗读（无需 API Key），电视没装系统语音时可直接使用；失败会自动回落系统语音',
- auto:'有云端 Key 就用云端，没有就用本地系统语音',
+ auto:'有云端 Key 就用云端；没有 Key 时优先用本地语音，无本地语音则自动用免费 Edge 语音',
  deepseek:'效果最好，需要 DeepSeek Key；电视没有本地语音时选这个',
  azure:'需要 Azure 语音服务的区域和 Key',
  aliyun:'需要阿里云的 AppKey 和 AccessKey',
 };
+const speechRates:[string,string][]=[['0.8','0.8x（较慢）'],['1','1.0x（正常）'],['1.2','1.2x（较快）'],['1.4','1.4x（快速）']];
 const edgeVoices:[string,string][]=[['auto','按题目语言自动选择'],['zh-CN-XiaoxiaoNeural','晓晓（普通话女声）'],['zh-CN-YunxiNeural','云希（普通话男声）'],['zh-CN-YunjianNeural','云健（普通话解说）'],['zh-CN-XiaoyiNeural','晓伊（普通话童声/女声）'],['zh-HK-HiuGaaiNeural','晓佳（粤语女声）'],['zh-TW-HsiaoChenNeural','晓臻（台湾女声）'],['en-US-JennyNeural','Jenny（美式英语）'],['en-GB-SoniaNeural','Sonia（英式英语）']];
 const deepseekVoices:[string,string][]=[['stella','stella（女声）'],['tide','tide（男声）']];
 const recognizeModes:[string,string][]=[['system','设备系统识别'],['auto','自动（填了 Key 用 DeepSeek）'],['deepseek','DeepSeek 转写']];
@@ -150,6 +151,15 @@ export default function SpeechSettings({sessionId}:{sessionId:number}){
       <SelectTrigger aria-label="朗读通路" aria-invalid={!!errors.mode} className="w-full sm:w-44"><SelectValue>{modeLabels[form.mode]||'请选择'}</SelectValue></SelectTrigger>
       <SelectContent>{modes.map(value=><SelectItem key={value} value={value}>{modeLabels[value]}</SelectItem>)}</SelectContent>
      </Select>
+     </ItemActions>
+    </Item>
+    <Item size="sm" className="rounded-none px-0 py-4">
+     <ItemContent><ItemTitle>朗读语速</ItemTitle><ItemDescription className="text-xs">适用于本地系统语音与免费 Edge 语音。</ItemDescription></ItemContent>
+     <ItemActions>
+      <Select value={String(form.speechRate??1)} onValueChange={value=>change('speechRate',Number(value))}>
+       <SelectTrigger aria-label="朗读语速" className="w-full sm:w-44"><SelectValue>{speechRates.find(([v])=>Number(v)===(Number(form.speechRate)||1))?.[1]||'1.0x（正常）'}</SelectValue></SelectTrigger>
+       <SelectContent>{speechRates.map(([value,label])=><SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
+      </Select>
      </ItemActions>
     </Item>
     <div className="space-y-2 py-4">

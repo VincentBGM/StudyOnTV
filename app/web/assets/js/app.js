@@ -44,8 +44,11 @@
   function scheduleText() { return (state.learning && state.learning.scheduleText) || ''; }
   // 朗读内容由家长在「设置 → 朗读」里定：只读题干、题干加选项、再加答案（答案在作答后才读）
   function readScope() { return (state.speech && state.speech.readScope) || 'question'; }
-  // 公式里的 $ 符号 TTS 会念出来，朗读前去掉
-  function speakable(text) { return String(text == null ? '' : text).replace(/\$\$?/g, '').trim(); }
+  // 公式里的 $ 符号和富文本标记 TTS 会念出来，朗读前去掉
+  function speakable(text) {
+    if (window.SOTV_PLAIN) return window.SOTV_PLAIN(text);
+    return String(text == null ? '' : text).replace(/\$\$?/g, '').trim();
+  }
   function readText(item) {
     if (!item) return '';
     var parts = [speakable(item.q)];
@@ -217,13 +220,14 @@
     if (window._pendingInput) { state.draft = { nonce: round.nonce, text: window._pendingInput.text || '', drawing: window._pendingInput.drawing || '' }; window._pendingInput = null; }
     else if (!state.draft || state.draft.nonce !== round.nonce) state.draft = { nonce: round.nonce, text: '', drawing: '' };
     state.selected = [];
-    $('qText').textContent = item.q;
+    if (window.SOTV_RICH) window.SOTV_RICH($('qText'), item.q);
+    else $('qText').textContent = item.q;
     $('qIndex').textContent = round.mode === 'count' ? round.correct || 0 : round.mode === 'streak' ? round.streak : round.mode === 'practice' ? round.answered + 1 : Math.min(round.answered + 1, round.target);
     $('qTotal').textContent = round.mode === 'practice' ? '题' : '/ ' + round.target;
     $('qMode').textContent = (round.extra ? '加练任务' : round.mode === 'streak' ? '连续答对' : round.mode === 'count' ? '答对指定题数' : round.mode === 'practice' ? '自由练习' : '本组任务') + ' · ' + new Array((item.difficulty || 2) + 1).join('★');
     $('qPool').textContent = round.extraPool > 0 ? '加练池还剩 ' + round.extraPool + ' 题' : '';
     $('qDots').textContent = round.mode === 'streak' ? '连续答对 ' + round.streak + ' 题' : '';
-    var qLength = (item.q || '').length;
+    var qLength = speakable(item.q).length;
     $('qText').className = 'question' + (qLength > 120 ? ' longer' : qLength > 56 ? ' long' : '');
     if (state.speech && state.speech.autoRead) nativeCall('readInLanguage', [readText(item), item.language || '']);
     else nativeCall('stopReading');
@@ -275,8 +279,19 @@
         var button = document.createElement('button'); button.className = 'option focusable';
         button.setAttribute('data-opt', index);
         var letter = document.createElement('span'); letter.className = 'letter'; letter.textContent = String.fromCharCode(65 + index);
-        var label = document.createElement('span'); label.className = 'opt-text'; label.textContent = value;
-        button.appendChild(letter); button.appendChild(label); options.appendChild(button);
+        var body = document.createElement('span'); body.className = 'opt-body';
+        var optImg = Array.isArray(item.optionImages) ? item.optionImages[index] : '';
+        if (optImg && /^(https?:\/\/|data:image\/)/.test(optImg)) {
+          var img = document.createElement('img'); img.className = 'opt-image'; img.src = optImg; img.alt = '选项 ' + String.fromCharCode(65 + index);
+          img.onload = function () { window.setTimeout(fitQuiz, 0); };
+          body.appendChild(img);
+        }
+        if (String(value || '').trim()) {
+          var label = document.createElement('span'); label.className = 'opt-text';
+          if (window.SOTV_RICH) window.SOTV_RICH(label, value); else label.textContent = value;
+          body.appendChild(label);
+        }
+        button.appendChild(letter); button.appendChild(body); options.appendChild(button);
       });
       if (item.type === 'multiple') addSubmit(options, '确认所选答案');
     }
@@ -316,7 +331,18 @@
   }
   function renderMedia(item) {
     var box = $('qMedia'); box.innerHTML = '';
-    if (item.image && /^(https?:\/\/|data:image\/)/.test(item.image)) { var image = document.createElement('img'); image.src = item.image; image.alt = '题目配图'; image.className = 'question-media-image'; box.appendChild(image); }
+    var list = [], seen = {};
+    if (Array.isArray(item.images)) item.images.forEach(function (u) { if (u && !seen[u]) { seen[u] = true; list.push(u); } });
+    if (item.image && !seen[item.image]) list.unshift(item.image);
+    list.forEach(function (src) {
+      if (/^(https?:\/\/|data:image\/)/.test(src)) {
+        var image = document.createElement('img');
+        image.src = src; image.alt = '题目配图';
+        image.className = 'question-media-image' + (list.length > 1 ? ' is-multi' : '');
+        image.onload = function () { window.setTimeout(fitQuiz, 0); };
+        box.appendChild(image);
+      }
+    });
     if (item.audio && /^https?:\/\//.test(item.audio)) {
       if (window.SOTVNative) { var play = document.createElement('button'); play.className = 'btn btn-ghost focusable'; play.setAttribute('data-action', 'play-audio'); play.textContent = '播放题目音频'; box.appendChild(play); }
       else { var audio = document.createElement('audio'); audio.src = item.audio; audio.controls = true; audio.className = 'focusable'; audio.preload = 'none'; box.appendChild(audio); }
@@ -387,7 +413,8 @@
     $('fbIcon').textContent = right ? '✓' : '!';
     $('fbTitle').textContent = title;
     $('fbAnswer').textContent = answer ? '正确答案：' + answer : '';
-    $('fbTip').textContent = result.tip ? '解析：' + result.tip : '';
+    if (window.SOTV_RICH && result.tip) window.SOTV_RICH($('fbTip'), '解析：' + result.tip);
+    else $('fbTip').textContent = result.tip ? '解析：' + result.tip : '';
     // 「题目、选项和答案」：作答之后再读正确答案，作答前不剧透
     if (state.speech && state.speech.autoRead && readScope() === 'questionOptionsAnswer') {
       var spokenAnswer = written ? speakable(result.answerText || '')

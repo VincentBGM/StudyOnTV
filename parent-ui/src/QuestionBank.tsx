@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useState } from 'react';
+import { lazy, Suspense, useEffect, useReducer, useState } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Download, Globe, MoreHorizontal, Plus, Sparkles, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
@@ -34,9 +34,9 @@ import QuestionFilters from './components/bank/QuestionFilters';
 import QuestionList from './components/bank/QuestionList';
 import QuestionDetailSheet from './components/bank/QuestionDetailSheet';
 import QuestionFormDialog from './components/bank/QuestionFormDialog';
-import QuestionImportDialog from './components/bank/QuestionImportDialog';
-import BankMarketDialog from './components/bank/BankMarketDialog';
-import AiGenerateDialog from './components/bank/AiGenerateDialog';
+const QuestionImportDialog = lazy(() => import('./components/bank/QuestionImportDialog'));
+const BankMarketDialog = lazy(() => import('./components/bank/BankMarketDialog'));
+const AiGenerateDialog = lazy(() => import('./components/bank/AiGenerateDialog'));
 import { answerOf, blank, download, MathText } from './components/bank/shared';
 
 // GradingPage 等页面仍在从这里取这两个工具
@@ -117,6 +117,7 @@ export default function QuestionBank({ sessionId }: { sessionId: number }) {
             type: q.type || 'single',
             q: q.q,
             opts: q.type === 'boolean' ? ['正确', '错误'] : [...(q.a || [])],
+            optionImages: q.type === 'boolean' ? [] : (q.a || []).map((_: any, i: number) => (Array.isArray(q.optionImages) ? q.optionImages[i] || '' : '')),
             correct: q.type === 'multiple' ? [...(q.correctIndices || [])] : [q.k || 0],
             accepted: (q.answers || []).join('\n'),
             difficulty: q.difficulty || 2,
@@ -127,6 +128,7 @@ export default function QuestionBank({ sessionId }: { sessionId: number }) {
             level: q.level || '',
             bank: q.bank || '默认题库',
             image: q.image || '',
+            images: Array.isArray(q.images) && q.images.length ? [...q.images] : (q.image ? [q.image] : []),
             audio: q.audio || '',
             language: q.language ?? 'zh-CN',
           }
@@ -344,21 +346,33 @@ export default function QuestionBank({ sessionId }: { sessionId: number }) {
         />
       )}
 
-      <QuestionImportDialog
-        open={importing}
-        onOpenChange={setImporting}
-        meta={meta}
-        onImported={message => toast.success(message)}
-      />
+      {importing && (
+        <Suspense fallback={null}>
+          <QuestionImportDialog
+            open={importing}
+            onOpenChange={setImporting}
+            meta={meta}
+            onImported={message => toast.success(message)}
+          />
+        </Suspense>
+      )}
 
-      <BankMarketDialog open={marketOpen} onOpenChange={setMarketOpen} sessionId={sessionId} />
+      {marketOpen && (
+        <Suspense fallback={null}>
+          <BankMarketDialog open={marketOpen} onOpenChange={setMarketOpen} sessionId={sessionId} />
+        </Suspense>
+      )}
 
-      <AiGenerateDialog
-        open={aiOpen}
-        onOpenChange={setAiOpen}
-        sessionId={sessionId}
-        onOpenImport={() => setImporting(true)}
-      />
+      {aiOpen && (
+        <Suspense fallback={null}>
+          <AiGenerateDialog
+            open={aiOpen}
+            onOpenChange={setAiOpen}
+            sessionId={sessionId}
+            onOpenImport={() => setImporting(true)}
+          />
+        </Suspense>
+      )}
 
       <Dialog
         open={!!remove}

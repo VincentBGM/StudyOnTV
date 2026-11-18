@@ -807,13 +807,27 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
 
     fun upsertQuestion(item: JSONObject): String {
         val stem = item.optString("q").trim()
-        require(stem.isNotEmpty() && stem.length <= 5000) { "请填写题干" }
+        require(stem.isNotEmpty() && stem.length <= 10000) { "请填写题干" }
         val type = item.optString("type", "single")
         require(type in listOf("single", "multiple", "boolean", "text", "subjective")) { "不支持此题型" }
         val options = if (type == "boolean") JSONArray(listOf("正确", "错误")) else item.optJSONArray("a") ?: JSONArray()
+        val optionImages = item.optJSONArray("optionImages")
+        if (optionImages != null) {
+            require(optionImages.length() <= 8) { "选项配图不能超过 8 张" }
+            for (i in 0 until optionImages.length()) {
+                val img = optionImages.optString(i).trim()
+                if (img.isNotEmpty()) {
+                    require(((img.startsWith("https://") || img.startsWith("http://")) && img.length <= 2048) ||
+                        (img.startsWith("data:image/") && img.length <= 500000)) { "选项 ${'A' + i} 配图地址无效" }
+                }
+            }
+        }
         if (type != "text" && type != "subjective") {
             require(options.length() in 2..8) { "需要 2–8 个选项" }
-            for (i in 0 until options.length()) require(options.getString(i).isNotBlank()) { "选项不能为空" }
+            for (i in 0 until options.length()) {
+                val optImg = optionImages?.optString(i)?.trim().orEmpty()
+                require(options.getString(i).isNotBlank() || optImg.isNotEmpty()) { "选项不能为空" }
+            }
         }
         val indices = if (type == "multiple") item.optJSONArray("correctIndices") ?: JSONArray()
             else JSONArray().put(item.optInt("k", -1))
@@ -838,6 +852,22 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
             require(value.isEmpty() || ((value.startsWith("https://") || value.startsWith("http://")) && value.length <= 2048) ||
                 (key == "image" && value.startsWith("data:image/") && value.length <= 500000)) { "图片或音频地址无效" }
             details.put(key, value)
+        }
+        if (item.has("images")) {
+            val rawImages = item.optJSONArray("images") ?: JSONArray()
+            require(rawImages.length() <= 4) { "每道题最多支持 4 张配图" }
+            val validImages = JSONArray()
+            for (i in 0 until rawImages.length()) {
+                val value = rawImages.optString(i).trim()
+                if (value.isEmpty()) continue
+                require(((value.startsWith("https://") || value.startsWith("http://")) && value.length <= 2048) ||
+                    (value.startsWith("data:image/") && value.length <= 500000)) { "第 ${i + 1} 张配图地址无效" }
+                validImages.put(value)
+            }
+            details.put("images", validImages)
+            if (details.optString("image").isEmpty() && validImages.length() > 0) {
+                details.put("image", validImages.getString(0))
+            }
         }
         // #126：支持粤语 / 台湾国语；留空表示跟随设备系统语言（粤语系统不再被强制读成普通话）
         val language = item.optString("language", "zh-CN")

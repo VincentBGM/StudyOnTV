@@ -54,8 +54,10 @@ object EdgeTts {
         }
     }
 
-    fun synthesize(text: String, voice: String, language: String = ""): ByteArray {
+    fun synthesize(text: String, voice: String, language: String = "", rate: Double = 1.0): ByteArray {
         val chosenVoice = voice.trim().ifEmpty { defaultVoice(language) }
+        val pct = (((rate.coerceIn(0.7, 1.5)) - 1.0) * 100.0).toInt()
+        val rateStr = if (pct >= 0) "+${pct}%" else "${pct}%"
         val connId = UUID.randomUUID().toString().replace("-", "")
         val muid = randomHex(16)
         val path = "/consumer/speech/synthesize/readaloud/edge/v1" +
@@ -83,7 +85,7 @@ object EdgeTts {
             val reqId = UUID.randomUUID().toString().replace("-", "")
             val lang = chosenVoice.split("-").take(2).joinToString("-").ifEmpty { "zh-CN" }
             val ssml = "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='$lang'>" +
-                "<voice name='$chosenVoice'><prosody pitch='+0Hz' rate='+0%' volume='+0%'>${escapeXml(text)}</prosody></voice></speak>"
+                "<voice name='$chosenVoice'><prosody pitch='+0Hz' rate='$rateStr' volume='+0%'>${escapeXml(text)}</prosody></voice></speak>"
             val ssmlMsg = "X-RequestId:$reqId\r\n" +
                 "Content-Type:application/ssml+xml\r\n" +
                 "X-Timestamp:$ts\r\n" +
