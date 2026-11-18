@@ -1,21 +1,21 @@
 {
-  "version": "0.4.4",
-  "versionCode": 46,
+  "version": "0.5.0",
+  "versionCode": 47,
   "force": false,
-  "notes": "release: v0.4.4",
-  "publishedAt": "2026-11-18T02:24:11.678Z",
+  "notes": "fix(ui): 统一使用 @/lib/utils 中的 cn，修复 CI 全新安装时的类型检查",
+  "publishedAt": "2026-11-18T07:35:31.398Z",
   "assets": {
     "tv": {
-      "name": "StudyOnTV-Android-TV-v0.4.4.apk",
-      "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.4.4/StudyOnTV-Android-TV-v0.4.4.apk",
-      "sha256": "d4e61209e6f877eec849a439daa78b74b3d59960942c90f92551603c9c13da84",
-      "size": 3472642
+      "name": "StudyOnTV-Android-TV-v0.5.0.apk",
+      "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.5.0/StudyOnTV-Android-TV-v0.5.0.apk",
+      "sha256": "1da00bee9207dcb16e5dc0f46037d56c10a0126e20dfd0b9aeaae4a6f9cd9a09",
+      "size": 3442678
     },
     "mobile": {
-      "name": "StudyOnTV-Mobile-v0.4.4.apk",
-      "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.4.4/StudyOnTV-Mobile-v0.4.4.apk",
-      "sha256": "b327e102c05c6c3f649006da9c2f7c0fac2440321af946602ce63d3a5cc688dd",
-      "size": 3474488
+      "name": "StudyOnTV-Mobile-v0.5.0.apk",
+      "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.5.0/StudyOnTV-Mobile-v0.5.0.apk",
+      "sha256": "12df754775a764893b680c7ecec40879ebdb8c433547ec3959842e3b9d34c6a7",
+      "size": 3445607
     }
   }
 }
