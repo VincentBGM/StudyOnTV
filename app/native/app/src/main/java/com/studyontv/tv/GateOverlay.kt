@@ -22,20 +22,20 @@ class GateOverlay(
     private val handler = Handler(Looper.getMainLooper())
     private val manager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private var web: WebView? = null
-    private var attached = false
+    @Volatile private var attached = false
     private var currentReason = ""
     private val remote = RemoteKeys { Bridge().openParent() }
     val isShowing: Boolean get() = attached
-    var lastError: String = ""
+    @Volatile var lastError: String = ""
         private set
     /** 失败分类：permission / window / layout / ""（空=没失败）。诊断里直接可读。 */
-    var lastErrorKind: String = ""
+    @Volatile var lastErrorKind: String = ""
         private set
     /** addView 成功 != 真的能看到：随后校验窗口尺寸与可见性（部分电视会接受窗口却给 0 尺寸） */
-    var verifiedVisible: Boolean = false
+    @Volatile var verifiedVisible: Boolean = false
         private set
     /** 悬浮页的 document.readyState 是否 complete（黑屏 / 本地服务没起来的诊断依据） */
-    var pageReady: Boolean = false
+    @Volatile var pageReady: Boolean = false
         private set
     private var attachAt = 0L
     private var verifyAttempts = 0
@@ -56,6 +56,8 @@ class GateOverlay(
      * 共试 3 次（1.0s / 1.9s / 2.8s）：大屏第一次创建 WebView 可能慢，
      * 不能因为一次布局没完成就把刚弹出的学习页当成失败。
      */
+    private val probePageTask = Runnable { if (attached) probePage() }
+
     private val verifyVisibility = object : Runnable {
         override fun run() {
             if (!attached) return
@@ -140,8 +142,9 @@ class GateOverlay(
             } else view.evaluateJavascript("window.SOTV_RESUME&&SOTV_RESUME()", null)
             view.requestFocus()
             handler.removeCallbacks(verifyVisibility)
+            handler.removeCallbacks(probePageTask)
             handler.postDelayed(verifyVisibility, 1000)
-            handler.postDelayed({ if (attached) probePage() }, 2500)
+            handler.postDelayed(probePageTask, 2500)
             MediaPause.pause(context)
             true
         } catch (e: Exception) {
@@ -154,6 +157,7 @@ class GateOverlay(
 
     fun suspend() {
         handler.removeCallbacks(verifyVisibility)
+        handler.removeCallbacks(probePageTask)
         val view = web ?: return
         if (attached) try { manager.removeViewImmediate(view) } catch (_: Exception) { }
         if (attached && !InputSupport.active) MediaPause.release(context)
@@ -182,6 +186,7 @@ class GateOverlay(
     fun destroy() {
         handler.removeCallbacks(release); releaseScheduled = false
         handler.removeCallbacks(verifyVisibility)
+        handler.removeCallbacks(probePageTask)
         val view = web ?: return
         suspend()
         MediaPause.release(context)

@@ -143,6 +143,10 @@ export default function DevicePanel({
     refetchInterval: 15000,
   });
   const [polling, setPolling] = useState(false);
+  const pollTimer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (pollTimer.current !== null) window.clearTimeout(pollTimer.current);
+  }, []);
   const update = useQuery({
     queryKey: ['update', sessionId],
     queryFn: () => api('/api/update'),
@@ -256,7 +260,10 @@ export default function DevicePanel({
       );
       client.invalidateQueries({ queryKey: ['device', sessionId] });
     },
-    onError: (error: any) => toast.error(error.message),
+    onError: (error: any) => {
+      submittedName.current = '';
+      toast.error(error.message);
+    },
   });
   const saveName = () => {
     const nextName = name.trim();
@@ -309,7 +316,11 @@ export default function DevicePanel({
       client.setQueryData(['update', sessionId], result);
       setPolling(true);
       toast.message('正在检查更新…');
-      window.setTimeout(() => setPolling(false), 70000);
+      if (pollTimer.current !== null) window.clearTimeout(pollTimer.current);
+      pollTimer.current = window.setTimeout(() => {
+        pollTimer.current = null;
+        setPolling(false);
+      }, 70000);
     },
     onError: (error: any) => toast.error(error.message),
   });
@@ -359,7 +370,12 @@ export default function DevicePanel({
       client.setQueryData(['integration', sessionId], result);
       toast.success('已保存');
     },
-    onError: (error: any) => toast.error(error.message),
+    onError: (error: any) => {
+      if (integration.data) {
+        setScope({ read: !!integration.data.read, control: !!integration.data.control });
+      }
+      toast.error(error.message);
+    },
   });
   const revoke = useMutation({
     mutationFn: () => api('/api/integration', 'DELETE'),

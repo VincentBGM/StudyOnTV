@@ -338,10 +338,12 @@ export default function RulesPage({ state, sessionId }: { state: any; sessionId:
         validationToast.current = '';
         save.mutate(form.getValues());
       } else {
-        const first = collectErrorMessages(form.formState.errors)[0];
-        if (first && validationToast.current !== first.text) {
-          validationToast.current = first.text;
-          toast.error('无法自动保存：' + first.text);
+        const parsed = ruleSchema.safeParse(form.getValues());
+        const text = (!parsed.success ? parsed.error.issues[0]?.message : undefined)
+          || collectErrorMessages(form.formState.errors)[0]?.text;
+        if (text && validationToast.current !== text) {
+          validationToast.current = text;
+          toast.error('无法自动保存：' + text);
         }
       }
     }, 800);

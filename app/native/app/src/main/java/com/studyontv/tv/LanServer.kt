@@ -92,6 +92,7 @@ class LanServer(
                 while (true) {
                     val line = readLine(input) ?: break
                     if (line.isEmpty()) break
+                    if (headers.size >= 100) return reply(c.getOutputStream(), 400, "text/plain", "Too many headers".toByteArray())
                     val idx = line.indexOf(':')
                     if (idx > 0) headers[line.substring(0, idx).trim().lowercase()] = line.substring(idx + 1).trim()
                 }
@@ -111,9 +112,13 @@ class LanServer(
     }
 
     private fun route(method: String, path: String, query: String, headers: Map<String, String>, body: String, out: OutputStream, local: Boolean) {
-        val q = if (query.isEmpty()) emptyMap() else query.split("&").associate {
-            val kv = it.split("=", limit = 2)
-            kv[0] to java.net.URLDecoder.decode(kv.getOrElse(1) { "" }, "UTF-8")
+        val q = try {
+            if (query.isEmpty()) emptyMap() else query.split("&").associate {
+                val kv = it.split("=", limit = 2)
+                java.net.URLDecoder.decode(kv[0], "UTF-8") to java.net.URLDecoder.decode(kv.getOrElse(1) { "" }, "UTF-8")
+            }
+        } catch (_: IllegalArgumentException) {
+            return json(out, 400, err("bad_request").put("message", "请求参数格式错误"))
         }
         val deviceAccess = local && headers["x-device-token"] == AdminAuth.deviceToken
         val token = headers["authorization"]?.removePrefix("Bearer ") ?: headers["x-admin-token"]
@@ -130,9 +135,9 @@ class LanServer(
         if (path.startsWith("/api/") && path != "/api/hello") {
             val adminKey = headers["x-admin-key"]
             val integrationToken = token?.takeIf { it.startsWith("sotv_") }
-            if (integrationToken != null && !IntegrationAuth.takeBudget())
-                return json(out, 429, err("too_many_requests").put("message", "请求太频繁，请稍后再试"))
             integration = IntegrationAuth.verify(context, integrationToken)
+            if (integration != null && !IntegrationAuth.takeBudget())
+                return json(out, 429, err("too_many_requests").put("message", "请求太频繁，请稍后再试"))
             parent = AdminAuth.valid(token) || (adminKey != null && AdminAuth.verify(context, adminKey))
             if (!deviceAccess && !parent && integration == null) return json(out, 401, err("unauthorized"))
             // 集成令牌只能访问明确列出的接口；不能改规则、题库、密码或权限本身。
@@ -405,9 +410,9 @@ class LanServer(
             json(ctx.out, 200, JSONObject().put("ok", true))
         }
         router.post("/api/remote") { ctx ->
-            // 家长会话，或带「控制」权限的集成令牌；学习页的设备令牌不能调用
-            val parent = AdminAuth.valid(ctx.token)
-            val control = IntegrationAuth.verify(context, ctx.token)?.control == true
+            // 家长会话（含 X-Admin-Key），或带「控制」权限的集成令牌；学习页的设备令牌不能调用
+            val parent = ctx.parent
+            val control = ctx.integration?.control == true
             if (!parent && !control) return@post json(ctx.out, 403, err("forbidden").put("message", "请先用管理密码登录"))
             val input = JSONObject(ctx.body.ifEmpty { "{}" })
             if (input.optString("action") == "credit") {
@@ -690,7 +695,6 @@ class LanServer(
     
     private fun readLine(input: BufferedInputStream): String? {
         val buf = ByteArrayOutputStream()
-        var prev = -1
         while (true) {
             val b = input.read()
             if (b == -1) return if (buf.size() == 0) null else buf.toString("UTF-8")
@@ -698,8 +702,8 @@ class LanServer(
                 val bytes = buf.toByteArray()
                 return String(bytes, 0, if (bytes.isNotEmpty() && bytes[bytes.size - 1] == '\r'.code.toByte()) bytes.size - 1 else bytes.size, Charsets.UTF_8)
             }
+            if (buf.size() >= 8192) throw IllegalArgumentException("Header line too long")
             buf.write(b)
-            prev = b
         }
     }
 

@@ -450,12 +450,17 @@ class LearningEngine(private val store: LocalStore) {
         if (freeQuotaNow > 0) {
             val freeConsumed = min(milliseconds.coerceIn(0, 5000), min(freeQuotaNow, available))
             if (freeConsumed > 0) {
-                put(freeKey, freeQuotaNow - freeConsumed)
-                if (freeKey == "free_quota_ms") put("free_used_ms", number("free_used_ms") + freeConsumed)
-                time.consumed(config, freeConsumed)
-                put("used_ms", number("used_ms") + freeConsumed)
-                pendingUsageMs += freeConsumed
-                if (pendingUsageMs >= 30000 || freeQuotaNow == freeConsumed) flushUsage()
+                val db = store.writableDatabase
+                db.beginTransaction()
+                try {
+                    put(freeKey, freeQuotaNow - freeConsumed)
+                    if (freeKey == "free_quota_ms") put("free_used_ms", number("free_used_ms") + freeConsumed)
+                    time.consumed(config, freeConsumed)
+                    put("used_ms", number("used_ms") + freeConsumed)
+                    pendingUsageMs += freeConsumed
+                    if (pendingUsageMs >= 30000 || freeQuotaNow == freeConsumed) flushUsage()
+                    db.setTransactionSuccessful()
+                } finally { db.endTransaction() }
                 return
             }
             // 额度已经扣完（家长收走时长 / 调小上限）：免费时长也扣不动，直接返回

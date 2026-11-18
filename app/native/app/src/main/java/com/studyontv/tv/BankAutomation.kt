@@ -129,7 +129,11 @@ object BankAutomation {
         try {
             val old = mutableListOf<String>()
             db.rawQuery("SELECT id,details FROM questions", null).use { cursor ->
-                while (cursor.moveToNext()) if (JSONObject(cursor.getString(1)?.takeIf { it.isNotBlank() } ?: "{}").optString("remoteSource") == sourceId) old.add(cursor.getString(0))
+                while (cursor.moveToNext()) {
+                    val rawDetails = cursor.getString(1)?.takeIf { it.isNotBlank() } ?: continue
+                    val remoteSource = try { JSONObject(rawDetails).optString("remoteSource") } catch (_: Exception) { "" }
+                    if (remoteSource == sourceId) old.add(cursor.getString(0))
+                }
             }
             val keep = mutableSetOf<String>()
             for (i in 0 until items.length()) {

@@ -239,17 +239,21 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
 
     /** 当前孩子：默认孩子用空串，沿用旧版本的存储键，升级时不用搬运数据 */
     @Volatile private var cachedChild: String? = null
+    private val childLock = Any()
 
     fun activeChild(): String {
         cachedChild?.let { return it }
-        val stored = rawGet("active_child")
-        val valid = when {
-            stored.isEmpty() -> DEFAULT_CHILD
-            readableDatabase.rawQuery("SELECT 1 FROM children WHERE id=? LIMIT 1", arrayOf(stored)).use { it.moveToFirst() } -> stored
-            else -> { rawSet("active_child", DEFAULT_CHILD); DEFAULT_CHILD }   // 孩子档案被删掉了
+        synchronized(childLock) {
+            cachedChild?.let { return it }
+            val stored = rawGet("active_child")
+            val valid = when {
+                stored.isEmpty() -> DEFAULT_CHILD
+                readableDatabase.rawQuery("SELECT 1 FROM children WHERE id=? LIMIT 1", arrayOf(stored)).use { it.moveToFirst() } -> stored
+                else -> { rawSet("active_child", DEFAULT_CHILD); DEFAULT_CHILD }   // 孩子档案被删掉了
+            }
+            cachedChild = valid
+            return valid
         }
-        cachedChild = valid
-        return valid
     }
 
     /** 学习相关的键按孩子隔离；朗读 / 批改 / 远程题库这类设备设置仍共用一份 */
@@ -336,11 +340,13 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
     }
 
     fun switchChild(id: String) {
-        ensureDefaultChild()
-        val exists = readableDatabase.rawQuery("SELECT 1 FROM children WHERE id=? LIMIT 1", arrayOf(id)).use { it.moveToFirst() }
-        require(exists) { "孩子档案不存在" }
-        rawSet("active_child", id)
-        cachedChild = null
+        synchronized(childLock) {
+            ensureDefaultChild()
+            val exists = readableDatabase.rawQuery("SELECT 1 FROM children WHERE id=? LIMIT 1", arrayOf(id)).use { it.moveToFirst() }
+            require(exists) { "孩子档案不存在" }
+            rawSet("active_child", id)
+            cachedChild = id
+        }
     }
 
     fun adminToken(): String = get("admin_token").ifEmpty {
@@ -398,8 +404,9 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
                 else weekFromWindow(defaults.optBoolean("allDay"), defaults.optString("windowStart"), defaults.optString("windowEnd"))
             } else fullWeek()
         defaults.put("weekSlots", migrated)
-        if (defaults.optString("holidayMode") !in listOf("sunday", "normal")) defaults.put("holidayMode", "sunday")
-            .put("quizSubjects", JSONArray()).put("quizLevels", JSONArray())
+        if (defaults.optString("holidayMode") !in listOf("sunday", "normal")) {
+            defaults.put("holidayMode", "sunday")
+        }
         return defaults
     }
 
@@ -940,7 +947,8 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
 
     fun recentEvents(limit: Int = 50): JSONArray {
         val out = JSONArray()
-        readableDatabase.rawQuery("SELECT type,payload,ts FROM events WHERE type!='usage' ORDER BY id DESC LIMIT ${limit.coerceIn(1, 500)}", null).use { c ->
+        readableDatabase.rawQuery("SELECT type,payload,ts FROM events WHERE type!='usage' AND child=? ORDER BY id DESC LIMIT ${limit.coerceIn(1, 500)}",
+            arrayOf(activeChild())).use { c ->
             while (c.moveToNext()) out.put(JSONObject().put("type", c.getString(0)).put("payload", JSONObject(c.getString(1))).put("ts", c.getLong(2)))
         }
         return out

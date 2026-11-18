@@ -39,8 +39,10 @@ object AnswerInput {
                 .putExtra("requestId", requestId)
                 .apply(extras)
                 .apply {
+                    // 不再加 MULTIPLE_TASK：它每次都会新建一个独立任务，输入页 finish 后任务被移除，
+                    // 前台瞬间掉回桌面，小米等固件会据此强停整个应用（#160）。
                     if (context !is Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_MULTIPLE_TASK or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
+                        Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
                 })
         } catch (_: RuntimeException) {
             active = false

@@ -225,8 +225,8 @@
     $('qDots').textContent = round.mode === 'streak' ? '连续答对 ' + round.streak + ' 题' : '';
     var qLength = (item.q || '').length;
     $('qText').className = 'question' + (qLength > 120 ? ' longer' : qLength > 56 ? ' long' : '');
-    nativeCall('stopReading');
     if (state.speech && state.speech.autoRead) nativeCall('readInLanguage', [readText(item), item.language || '']);
+    else nativeCall('stopReading');
     renderMedia(item);
     var options = $('qOptions'); options.innerHTML = '';
     var longest = 0, optionCount = (item.a || []).length;
@@ -400,10 +400,8 @@
     updateFeedbackClock();
     go.className = 'btn ' + (right ? 'btn-primary' : 'btn-danger') + ' focusable';
     if (window.SOTV_MATH) { window.SOTV_MATH($('fbAnswer')); window.SOTV_MATH($('fbTip')); }
-    // 选项已经作答，焦点只留在“继续”上（页脚的朗读也一起停用，否则方向键会落到反馈条后面）
+    // 选项已经作答，焦点只留在“继续”上（页脚的朗读保留，孩子可以重听题干和正确答案）
     all('#qOptions .focusable').forEach(function (el) { el.classList.remove('focusable'); el.classList.add('answered'); });
-    var readAloudBtn = $('readAloudBtn');
-    if (readAloudBtn) readAloudBtn.classList.remove('focusable');
     var list = focusables(); for (var i = 0; i < list.length; i++) if (list[i] === go) { setFocus(i); break; }
     if (!isTv()) go.focus();
   }
@@ -679,7 +677,19 @@
     if (action === 'clear-drawing') { state.draft.drawing = ''; renderQuestion(); }
     if (action === 'watch-lesson') nativeCall('watchLesson');
     if (action === 'play-audio' && state.round) nativeCall('playAudio', [state.round.question.audio || '']);
-    if (action === 'read-aloud') nativeCall('readInLanguage', [state.round ? readText(state.round.question) : '', state.round ? state.round.question.language || '' : '']);
+    if (action === 'read-aloud') {
+      // 作答后这一下就是「再读一遍」：题干 + 选项（按家长设置的朗读范围）+ 正确答案
+      var readItem = state.round ? state.round.question : null;
+      var spoken = readItem ? readText(readItem) : '';
+      var feedback = state.feedback;
+      if (feedback && readScope() === 'questionOptionsAnswer') {
+        var correct = (feedback.correctIndices || []).map(function (i) {
+          return String.fromCharCode(65 + i) + '、' + speakable((readItem.a || [])[i]);
+        }).join('，') || speakable(feedback.answerText || '');
+        if (correct) spoken += '。正确答案：' + correct;
+      }
+      nativeCall('readInLanguage', [spoken, readItem ? readItem.language || '' : '']);
+    }
     // retry 用于错误 / 空题库的重试，start-quiz 用于「时间到了」页的「开始答题」；两者都重新取题
     if (action === 'retry' || action === 'start-quiz') start();
     if (action === 'start-as-child' && !state.busy) {

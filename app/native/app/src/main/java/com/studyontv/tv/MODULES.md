@@ -54,7 +54,7 @@
 
 | 文件 | 职责 |
 |---|---|
-| `SpeechReader.kt` / `VoiceCapture.kt` | TTS 朗读、语音作答 |
+| `SpeechReader.kt` / `EdgeTts.kt` / `VoiceCapture.kt` | TTS 朗读（含内置微软 Edge 在线朗读）、语音作答 |
 | `TtsProbe.kt` | 本地语音引擎探测：有没有引擎、缺不缺语言包，供面板自检（#128） |
 | `GradingService.kt` | AI 批改与 AI 出题 |
 | `HolidayService.kt` | 节假日日历同步 |

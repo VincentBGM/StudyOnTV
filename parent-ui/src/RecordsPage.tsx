@@ -196,6 +196,11 @@ function CoverageCard({ sessionId }: { sessionId: number }) {
       <CardContent className="space-y-5 p-0 px-4 pb-5 pt-5 sm:px-5">
         {loading ? (
           <Skeleton className="h-24 w-full" />
+        ) : coverage.isError ? (
+          <div className="flex flex-col items-center gap-2 py-10 text-center">
+            <Target className="size-5 text-destructive/70" />
+            <FieldDescription className="text-destructive">无法读取答题覆盖情况</FieldDescription>
+          </div>
         ) : total === 0 ? (
           <div className="flex flex-col items-center gap-2 py-10 text-center">
             <Target className="size-5 text-muted-foreground/70" />
@@ -542,6 +547,11 @@ export default function RecordsPage({ sessionId }: { sessionId: number }) {
                 </div>
               </div>
             </div>
+          ) : history.isError ? (
+            <div className="flex flex-col items-center gap-2 py-14 text-center">
+              <ChartColumn className="size-5 text-destructive/70" />
+              <FieldDescription className="text-destructive">无法读取使用趋势</FieldDescription>
+            </div>
           ) : (
             <div className="flex flex-col items-center gap-2 py-14 text-center">
               <ChartColumn className="size-5 text-muted-foreground/70" />
@@ -617,6 +627,11 @@ export default function RecordsPage({ sessionId }: { sessionId: number }) {
                     })}
                   </TableBody>
                 </Table>
+              ) : history.isError ? (
+                <div className="flex flex-col items-center gap-2 px-4 py-14 text-center">
+                  <ListChecks className="size-5 text-destructive/70" />
+                  <FieldDescription className="text-destructive">无法读取答题记录</FieldDescription>
+                </div>
               ) : (
                 <div className="flex flex-col items-center gap-2 px-4 py-14 text-center">
                   <ListChecks className="size-5 text-muted-foreground/70" />
@@ -650,6 +665,11 @@ export default function RecordsPage({ sessionId }: { sessionId: number }) {
                     </li>
                   ))}
                 </ol>
+              ) : events.isError ? (
+                <div className="flex flex-col items-center gap-2 px-4 py-14 text-center">
+                  <History className="size-5 text-destructive/70" />
+                  <FieldDescription className="text-destructive">无法读取学习动态</FieldDescription>
+                </div>
               ) : (
                 <div className="flex flex-col items-center gap-2 px-4 py-14 text-center">
                   <History className="size-5 text-muted-foreground/70" />
