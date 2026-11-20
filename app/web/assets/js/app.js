@@ -77,6 +77,11 @@
   }
   // 答题 / 锁定页的家长解锁入口（默认关闭，家长在「时间计划」里打开）
   function canUnlock() { return !!(window.SOTVNative && typeof window.SOTVNative.askParentPassword === 'function' && typeof window.SOTVNative.quizUnlock === 'function'); }
+  function canUnlockSettings() { return !!(window.SOTVNative && typeof window.SOTVNative.askSettingsPassword === 'function' && typeof window.SOTVNative.settingsUnlock === 'function'); }
+  function isSettingsLockActive() {
+    var unlimited = state.learning && state.learning.override && state.learning.override.mode === 'indefinite';
+    return !isPureStudyMode() && !unlimited && state.config.blockSettingsDuringControl !== false;
+  }
   function nativeCall(name, args) {
     var bridge = window.SOTVNative;
     try { if (bridge && typeof bridge[name] === 'function') return bridge[name].apply(bridge, args || []); } catch (e) {}
@@ -899,9 +904,10 @@
     if (reason === 'settings') {
       icon($('lockIcon'), 'hourglass');
       $('lockTitle').textContent = '管控期间暂不能打开系统设置';
-      $('lockDesc').textContent = '家长验证后可临时进入，或返回学习页继续。';
+      $('lockDesc').textContent = '家长验证管理密码后可临时进入设置 2 分钟，或返回继续。';
       $('lockNote').textContent = '';
-      $('lockActions').innerHTML = '<button class="btn btn-primary focusable" data-action="return-learning">返回学习页</button>';
+      $('lockActions').innerHTML = '<button class="btn btn-primary focusable" data-action="return-learning">返回学习页</button>' +
+        (canUnlockSettings() ? '<button class="btn btn-ghost focusable" data-action="settings-unlock">家长验证进入设置</button>' : '');
       appendUnlockButton();
       focusDefault(); return;
     }
@@ -1197,6 +1203,16 @@
       }, 180000);
       nativeCall('askParentPassword');
     }
+    if (action === 'settings-unlock') {
+      if (!canUnlockSettings()) { toast('当前设备不支持密码验证'); return; }
+      state.settingsUnlockPending = true;
+      state.settingsUnlockPendingAt = Date.now();
+      var settingsPendingAt = state.settingsUnlockPendingAt;
+      window.setTimeout(function () {
+        if (state.settingsUnlockPendingAt === settingsPendingAt) { state.settingsUnlockPending = false; state.settingsUnlockPendingAt = 0; }
+      }, 180000);
+      nativeCall('askSettingsPassword');
+    }
     if (action === 'permissions' || action === 'password') nativeCall(action === 'permissions' ? 'openPermissions' : 'changePassword');
     if (action === 'clear-drawing') { state.draft.drawing = ''; renderQuestion(); }
     if (action === 'watch-lesson') nativeCall('watchLesson');
@@ -1265,7 +1281,7 @@
     loadState(function (error) {
       if (error) { show('quiz'); $('qText').textContent = error; return; }
       if (state.settingsGate) {
-        if (!isPureStudyMode() && state.config.blockSettingsDuringControl !== false && !state.learning.free) { lock('settings'); return; }
+        if (isSettingsLockActive()) { lock('settings'); return; }
         state.settingsGate = false;
       }
       if (isHubAvailable() && !state.learning.awaitingReview && (!state.round || hash.indexOf('#/hub') === 0)) {
@@ -1346,7 +1362,7 @@
           return;
         }
         if (state.settingsGate) {
-          if (!isPureStudyMode() && !state.learning.free && state.config.blockSettingsDuringControl !== false) return;
+          if (isSettingsLockActive()) return;
           state.settingsGate = false;
           if (isHubAvailable()) renderHub(); else start();
           return;
@@ -1395,10 +1411,29 @@
   window.SOTV_INPUT_CANCEL = function () {
     state.unlockPending = false;
     state.unlockPendingAt = 0;
+    state.settingsUnlockPending = false;
+    state.settingsUnlockPendingAt = 0;
   };
   window.SOTV_INPUT = function (result, token) {
     // 原生侧靠这个标记确认注入成功，失败会重试（部分电视 WebView 切回来时 JS 尚未就绪）
     if (token) window.__sotvAck = token;
+    if (state.settingsUnlockPending) {
+      state.settingsUnlockPending = false;
+      state.settingsUnlockPendingAt = 0;
+      var sPass = (result && result.text) || '';
+      if (!sPass) { toast('已取消验证'); return; }
+      var sReply = null;
+      try { sReply = JSON.parse(nativeCall('settingsUnlock', [sPass]) || 'null'); } catch (e) {}
+      if (sReply && sReply.ok) {
+        state.settingsGate = false;
+        state.lockReason = '';
+        toast('验证通过，已临时放行系统设置 2 分钟');
+        return;
+      }
+      toast(sReply && sReply.error === 'wrong' ? '密码错误，连续错误 5 次后需等待一分钟' : '验证失败，请重试');
+      focusDefault();
+      return;
+    }
     // 家长解锁：回传的是密码，不能写进答题草稿
     if (state.unlockPending) {
       state.unlockPending = false;

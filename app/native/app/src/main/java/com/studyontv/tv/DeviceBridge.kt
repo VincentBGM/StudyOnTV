@@ -100,6 +100,30 @@ open class DeviceBridge(protected val activity: Activity, private val connection
         DeviceRuntime.store.config().optBoolean("allowQuizUnlock", false)
     } catch (_: Throwable) { false }
 
+    /**
+     * 系统设置 / 应用管理拦截页的家长验证入口：只临时放行系统设置 2 分钟（不增加娱乐观看时长），
+     * 方便家长连接 WiFi / 蓝牙或正常管理设备，切回本应用或满 2 分钟后立即恢复拦截。
+     */
+    @JavascriptInterface
+    fun askSettingsPassword() {
+        activity.runOnUiThread {
+            web?.let { InputSupport.openPassword(activity, it, "输入管理密码，验证后可临时进入系统设置 2 分钟") }
+        }
+    }
+
+    @JavascriptInterface
+    fun settingsUnlock(value: String): String {
+        if (!AdminAuth.verify(activity, value)) return JSONObject().put("ok", false).put("error", "wrong").toString()
+        SystemSettingsGuard.grant()
+        Diag.info("Auth", "家长在设置拦截页验证密码，临时放行系统设置 2 分钟")
+        GateService.hideGates()
+        activity.runOnUiThread {
+            if (activity is GateActivity) activity.finish() else activity.moveTaskToBack(true)
+        }
+        GateService.refreshNow()
+        return JSONObject().put("ok", true).toString()
+    }
+
     @JavascriptInterface
     fun navigationBlocked(): Boolean {
         LearningNavigation.notifyBlocked(activity)

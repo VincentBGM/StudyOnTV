@@ -51,11 +51,24 @@ class WatchAccessibilityService : AccessibilityService() {
         if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val pkg = event.packageName?.toString()
             if (pkg != null && (pkg.contains("inputmethod") || pkg.contains("keyboard"))) return
+            if (pkg != null && pkg.contains("packageinstaller", ignoreCase = true)) {
+                val cls = event.className?.toString().orEmpty()
+                val texts = event.text?.mapNotNull { it?.toString() }.orEmpty()
+                val mentionsSelf = texts.any { it.contains("题了个题") || it.contains("StudyOnTV", ignoreCase = true) }
+                val isUninstall = cls.contains("Uninstall", ignoreCase = true) ||
+                    cls.contains("Delete", ignoreCase = true) ||
+                    texts.any { it.contains("卸载") }
+                if (mentionsSelf && isUninstall && SystemSettingsGuard.onPotentialTamper(this)) {
+                    performGlobalAction(GLOBAL_ACTION_BACK)
+                    return
+                }
+            }
             // anchor / countdown / gate 悬浮窗不代表应用 Activity 在前台（#96）。
             val ownOverlay = pkg == packageName && !Foreground.hasResumedActivity()
             if (!ownOverlay && (!GateService.hasGate() || pkg != packageName)) {
                 val cls = event.className?.toString()?.takeIf { it.contains("Activity") }
                 Foreground.update(pkg, cls)
+                SystemSettingsGuard.onExternalWindowChanged(this, pkg)
             }
             // 无障碍服务由系统常驻，顺便充当看门狗：管理服务被系统清理后在下一次切换应用时拉起
             if (!GateService.running) GateService.ensureRunning(this, "accessibility")

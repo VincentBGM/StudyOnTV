@@ -238,7 +238,7 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
                 var id = ""
                 var raw = ""
                 db.rawQuery(
-                    "SELECT rowid,id,details FROM questions WHERE rowid>? AND details LIKE '%data:image/%' ORDER BY rowid LIMIT 1",
+                    "SELECT rowid,id,details FROM questions WHERE rowid>? AND details LIKE '%data:image%' ORDER BY rowid LIMIT 1",
                     arrayOf(lastRow.toString())
                 ).use { c ->
                     if (c.moveToFirst()) {
@@ -269,7 +269,7 @@ class LocalStore(context: Context, databaseName: String = "studyontv.db") : SQLi
                 var id = ""
                 var raw = ""
                 db.rawQuery(
-                    "SELECT rowid,id,payload FROM reviews WHERE rowid>? AND payload LIKE '%data:image/%' ORDER BY rowid LIMIT 1",
+                    "SELECT rowid,id,payload FROM reviews WHERE rowid>? AND payload LIKE '%data:image%' ORDER BY rowid LIMIT 1",
                     arrayOf(lastRow.toString())
                 ).use { c ->
                     if (c.moveToFirst()) {
