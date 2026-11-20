@@ -65,6 +65,13 @@ object SpeechReader {
     /** 最近一次朗读 / 播放的结果，供 speechStatus 桥与回归测试断言 */
     @Volatile private var last: JSONObject? = null
     @Volatile private var speaking = false
+    /** 最近一次朗读活跃时间（elapsedRealtime），用于 MediaPause.enforce 避免把自家朗读误判成后台视频而静音（#168） */
+    @Volatile private var lastSpokeAt = 0L
+
+    private fun markSpeaking(active: Boolean) {
+        speaking = active
+        lastSpokeAt = try { android.os.SystemClock.elapsedRealtime() } catch (_: Throwable) { 0L }
+    }
     /** 桥的回报回调（只在一次朗读 / 播放期间持有，stopNow 释放，避免长期抓住 WebView） */
     private var notice: ((JSONObject) -> Unit)? = null
     private var cachedContext: Context? = null
@@ -195,12 +202,12 @@ object SpeechReader {
             try {
                 player = MediaPlayer().apply {
                     setAudioAttributes(attributes); setDataSource(url)
-                    setOnPreparedListener { if (request == generation) start() else release() }
+                    setOnPreparedListener { if (request == generation) { markSpeaking(true); start() } else release() }
                     setOnCompletionListener {
-                        release(); if (request == generation) { player = null; notify(true, "audio", "done", "", "", false, "") }
+                        release(); if (request == generation) { markSpeaking(false); player = null; notify(true, "audio", "done", "", "", false, "") }
                     }
                     setOnErrorListener { _, what, extra ->
-                        release(); if (request == generation) player = null
+                        release(); if (request == generation) { markSpeaking(false); player = null }
                         audioFailed(app, request, "player-error", "音频无法播放（what=$what extra=$extra），请检查网络或改用朗读")
                         true
                     }
@@ -224,6 +231,15 @@ object SpeechReader {
         .put("reason", "idle").put("message", "").put("at", 0L)
 
     fun speaking(): Boolean = speaking
+
+    /** 正在朗读或刚结束朗读不久（Android AudioManager.isMusicActive 在停播后仍会残留 1–2 秒） */
+    fun speakingRecently(graceMs: Long = 2500L): Boolean {
+        if (speaking) return true
+        val at = lastSpokeAt
+        if (at <= 0L) return false
+        val now = try { android.os.SystemClock.elapsedRealtime() } catch (_: Throwable) { return false }
+        return now - at < graceMs
+    }
 
     /** 失败信息结构（纯函数，回归测试可直接断言结构；不含题目 / 答案明文） */
     fun failureNotice(mode: String, reason: String, requested: String, language: String, degraded: Boolean, message: String): JSONObject =
@@ -309,7 +325,7 @@ object SpeechReader {
 
     private fun audioFailed(context: Context, request: Int, reason: String, message: String) {
         if (request != generation) return
-        speaking = false
+        markSpeaking(false)
         notify(false, "audio", reason, "", "", false, message)
         try { Toast.makeText(context, "音频无法播放，请检查网络或改用朗读", Toast.LENGTH_SHORT).show() } catch (_: Exception) { }
     }
@@ -323,21 +339,21 @@ object SpeechReader {
         }
         track = null
         player?.release(); player = null; audioFile?.delete(); audioFile = null
-        speaking = false; currentText = ""; currentLanguage = ""; lastUtteranceId = ""; retriedDefault = false
+        markSpeaking(false); currentText = ""; currentLanguage = ""; lastUtteranceId = ""; retriedDefault = false
         notice = null
     }
 
     /** UtteranceProgressListener：朗读结束清理状态，合成失败记诊断并用默认语言补读一次 */
     private val progress = object : UtteranceProgressListener() {
-        override fun onStart(utteranceId: String?) { speaking = true }
+        override fun onStart(utteranceId: String?) { markSpeaking(true) }
         override fun onDone(utteranceId: String?) {
             if (utteranceId != lastUtteranceId) return
-            speaking = false; currentText = ""; currentLanguage = ""; lastUtteranceId = ""
+            markSpeaking(false); currentText = ""; currentLanguage = ""; lastUtteranceId = ""
         }
         @Deprecated("Deprecated in Java")
         override fun onError(utteranceId: String?) = onError(utteranceId, TextToSpeech.ERROR)
         override fun onError(utteranceId: String?, errorCode: Int) {
-            speaking = false
+            markSpeaking(false)
             Diag.warn("Speech", "utterance error id=$utteranceId code=$errorCode language=${currentLanguage.ifEmpty { "-" }}")
             val request = utteranceId?.split("-")?.getOrNull(1)?.toIntOrNull() ?: return
             if (request != generation) return
@@ -420,7 +436,7 @@ object SpeechReader {
                 return
             }
         }
-        speaking = true
+        markSpeaking(true)
         notify(true, mode, if (plan.degraded) "language-fallback" else "ok", plan.requested.ifEmpty { plan.language }, plan.language, plan.degraded, "")
     }
 
@@ -651,16 +667,18 @@ object SpeechReader {
                         player = MediaPlayer().apply {
                             setAudioAttributes(attributes); setDataSource(file.absolutePath)
                             setOnCompletionListener {
+                                markSpeaking(false)
                                 release(); player = null; file.delete(); audioFile = null
                                 cloudPart(context, parts, index + 1, language, config, mode, request)
                             }
                             setOnErrorListener { _, what, extra ->
+                                markSpeaking(false)
                                 release(); player = null; file.delete(); audioFile = null
                                 Diag.warn("Speech", "cloud audio error mode=$mode what=$what extra=$extra, fallback to system")
                                 systemRead(context, parts.drop(index).joinToString(""), language, request, mode)
                                 true
                             }
-                            prepare(); start()
+                            prepare(); markSpeaking(true); start()
                         }
                     } catch (e: Exception) {
                         Diag.warn("Speech", "cloud playback failed mode=$mode ${e.javaClass.simpleName}: ${e.message.orEmpty().take(120)}, fallback to system")
@@ -703,6 +721,7 @@ object SpeechReader {
                     AudioManager.AUDIO_SESSION_ID_GENERATE)
                 audioTrack = created
                 track = created
+                markSpeaking(true)
                 created.play()
                 var offset = 0
                 while (offset < pcm.data.size && request == generation) {
@@ -723,6 +742,7 @@ object SpeechReader {
                 Diag.warn("Speech", "pcm playback failed $message")
                 main.post { if (request == generation) onError(message) }
             } finally {
+                markSpeaking(false)
                 if (track === audioTrack) track = null
                 try { audioTrack?.pause(); audioTrack?.flush() } catch (_: Exception) { }
                 try { audioTrack?.release() } catch (_: Exception) { }

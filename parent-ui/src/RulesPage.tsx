@@ -141,7 +141,7 @@ const fieldLabels: Record<string, string> = {
   restEnabled: '强制休息',
   trafficAssistEnabled: '按流量判断是否在播放',
   backgroundAnchorEnabled: '保留后台空窗口',
-  blockSettingsDuringControl: '锁定时不允许进系统设置',
+  blockSettingsDuringControl: '管控期间不允许进系统设置与应用管理',
   allDay: '全天管控',
   childSelectLevel: '孩子选择年级',
   difficultyRewardEnabled: '按题目星级奖励',
@@ -973,9 +973,9 @@ export default function RulesPage({ state, sessionId }: { state: any; sessionId:
                   </Field>
                   <Field orientation="responsive" className="py-3.5">
                     <FieldContent>
-                      <FieldTitle>锁定时不允许进系统设置</FieldTitle>
+                      <FieldTitle>管控期间不允许进系统设置与应用管理</FieldTitle>
                       <FieldDescription className="text-xs leading-5">
-                        锁定期间打不开系统设置；需要开启无障碍权限
+                        开启后（默认开启），管控、可用时长、临时解锁及自由时段均拦截系统设置与应用管理，防止从设置卸载；家长可在拦截页输管理密码临时进入 2 分钟。需开启无障碍或使用情况访问权限
                       </FieldDescription>
                     </FieldContent>
                     {toggle('blockSettingsDuringControl')}
@@ -1004,6 +1004,14 @@ export default function RulesPage({ state, sessionId }: { state: any; sessionId:
                       <FieldDescription className="text-xs leading-5">
                         这些应用在前台时不扣观看时长、不弹题，适合系统屏保、网课 App。最多 100 个。
                       </FieldDescription>
+                      {!!(c.watchWhitelist && c.watchWhitelist.length > 0) &&
+                        device.data?.monitor &&
+                        !device.data.monitor.accessibility &&
+                        !device.data.monitor.usageAccess && (
+                          <p className="mt-1.5 text-xs leading-5 text-amber-600 dark:text-amber-400">
+                            ⚠ 当前设备未开启「使用情况访问」和「无障碍服务」，系统无法识别正在运行的应用，白名单暂不会生效；请到「设置 → 设备」开启其中任意一项。
+                          </p>
+                        )}
                     </FieldContent>
                     <Controller
                       name="watchWhitelist"

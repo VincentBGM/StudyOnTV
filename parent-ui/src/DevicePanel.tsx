@@ -589,8 +589,8 @@ export default function DevicePanel({
               title="防卸载"
               description={
                 device.data?.deviceOwner
-                  ? '由设备所有者权限持续执行卸载限制。'
-                  : '普通设备管理员；部分电视的厂商卸载入口可能不受保护。'
+                  ? '由设备所有者权限持续执行系统级卸载限制。'
+                  : '设备管理员防桌面直删；配合无障碍权限与「不允许进系统设置与应用管理」可同时拦截从设置卸载。'
               }
             >
               {device.data?.uninstallProtected ? (
@@ -689,15 +689,11 @@ export default function DevicePanel({
               </Button>
             </SettingItem>
             <SettingItem
-              title="崩溃报告"
-              description={
-                device.data?.crashUpload?.builtInEndpoint
-                  ? '崩溃后自动上传调用堆栈、设备型号和应用版本；不含题库、管理密码和答题记录。'
-                  : '崩溃后自动上传调用堆栈、设备型号和应用版本；不含题库、管理密码和答题记录。需先填好下面的上报地址。'
-              }
+              title="参与软件体验提升计划"
+              description="帮助我们持续优化设备兼容性与使用体验，可随时关闭。"
             >
               <Switch
-                aria-label="崩溃报告"
+                aria-label="参与软件体验提升计划"
                 checked={!!device.data?.crashUpload?.consent}
                 disabled={crash.isPending || !device.data}
                 onCheckedChange={value => crash.mutate({ consent: value })}
@@ -707,17 +703,17 @@ export default function DevicePanel({
               title="上报地址"
               description={
                 device.data?.crashUpload?.pending
-                  ? '有 1 份崩溃日志待上传，下次启动会自动补传。'
+                  ? '有待上传日志，下次启动会自动补传。'
                   : device.data?.crashUpload?.builtInEndpoint
-                    ? '不填就用内置地址；填了会覆盖内置值。'
-                    : 'Cloudflare Worker 地址，留空表示只在本机保留日志。'
+                    ? '不填就用内置地址；填了会覆盖内置值。支持阿里云 OSS 桶地址或自定义接收端。'
+                    : '阿里云 OSS 桶地址（如 https://bucket.oss-cn-hangzhou.aliyuncs.com）或自定义接收端，留空表示仅本地保留。'
               }
               wideControl
             >
               <Input
-                aria-label="崩溃上报地址"
+                aria-label="日志上报地址"
                 className="h-9 w-full sm:w-80"
-                placeholder={device.data?.crashUpload?.builtInEndpoint || 'https://sotv-crash.xxx.workers.dev/crash'}
+                placeholder={device.data?.crashUpload?.builtInEndpoint || 'https://bucket.oss-cn-hangzhou.aliyuncs.com'}
                 autoComplete="off"
                 spellCheck={false}
                 value={endpoint}

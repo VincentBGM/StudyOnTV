@@ -101,6 +101,7 @@ const searchEntries:SearchEntry[]=[
  {id:'rules-time',page:'rules',where:'学习计划 · 时段',title:'可用时段、网课时段、休息',keywords:'时段 时间 网课 休息 睡眠 晚上 可用 周一 周二 节假日'},
  {id:'rules-scope',page:'rules',where:'学习计划 · 范围',title:'年级、科目与题库范围',keywords:'年级 科目 范围 题库 难度 出题 顺序'},
  {id:'rules-more',page:'rules',where:'学习计划 · 记忆与加练',title:'艾宾浩斯间隔重复、只背错题、加练',keywords:'加练 错题 复习 记忆曲线 anki 只背错题 密码 解锁'},
+ {id:'rules-guard-settings',page:'rules',where:'学习计划 · 高级',title:'拦截系统设置与应用管理（防卸载加固）',keywords:'防卸载 卸载 系统设置 应用管理 手机管家 拦截 密码'},
  {id:'bank',page:'bank',where:'题库',title:'题目列表与筛选',keywords:'题库 题目 搜索 筛选 暂停 难度 科目'},
  {id:'bank-import',page:'bank',where:'题库 · 导入导出',title:'导入 / 导出题目',keywords:'导入 json 文档 导出 备份 添加题目'},
  {id:'bank-ai',page:'bank',where:'题库 · AI 出题',title:'AI 错题举一反三与模板出题',keywords:'ai 出题 生成 变式 错题 举一反三 在线题库 市场 共享题库'},
@@ -153,8 +154,8 @@ function App(){const[session,setSession]=useState(()=>restoreSession()?1:0),[nex
 
 function Login({onLogin,theme}:{onLogin:()=>void,theme:ReturnType<typeof useTheme>}){
  const[host,updateHost]=useState(getHost()),[secret,setSecret]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
- const[visible,setVisible]=useState(false),[accepted,setAccepted]=useState(true),[crashReports,setCrashReports]=useState(false),[docType,setDocType]=useState<'terms'|'privacy'|null>(null);
- async function submit(e:any){e.preventDefault();if(busy)return;setError('');if(!accepted)return setError('请先同意使用说明和隐私条款');if(secret.length<6)return setError('请输入管理密码');setBusy(true);try{setHost(host);const result=await api('/api/auth','POST',{passphrase:secret,remember:true});setToken(result.token);saveSession(getHost(),result.token);if(crashReports)api('/api/device/crash','PUT',{consent:true}).catch(()=>{});setSecret('');onLogin();}catch(e:any){setError(e.message==='Failed to fetch'?'无法连接设备，请检查设备地址和 WiFi':e.message);}finally{setBusy(false);}}
+ const[visible,setVisible]=useState(false),[accepted,setAccepted]=useState(true),[crashReports,setCrashReports]=useState(true),[docType,setDocType]=useState<'terms'|'privacy'|null>(null);
+ async function submit(e:any){e.preventDefault();if(busy)return;setError('');if(!accepted)return setError('请先同意使用说明和隐私条款');if(secret.length<6)return setError('请输入管理密码');setBusy(true);try{setHost(host);const result=await api('/api/auth','POST',{passphrase:secret,remember:true});setToken(result.token);saveSession(getHost(),result.token);api('/api/device/crash','PUT',{consent:crashReports}).catch(()=>{});setSecret('');onLogin();}catch(e:any){setError(e.message==='Failed to fetch'?'无法连接设备，请检查设备地址和 WiFi':e.message);}finally{setBusy(false);}}
  return <main className="relative min-h-svh overflow-hidden bg-background">
   <div aria-hidden className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,color-mix(in_oklab,var(--border)_45%,transparent)_1px,transparent_1px),linear-gradient(to_bottom,color-mix(in_oklab,var(--border)_45%,transparent)_1px,transparent_1px)] bg-[size:56px_56px] [mask-image:linear-gradient(to_bottom,black,transparent_78%)]"/>
   <header className="relative z-10 mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 md:px-6"><div className="flex items-center gap-2 text-sm font-semibold"><span className="brand-icon size-8"><Leaf className="size-4"/></span><span>题了个题</span></div><ThemeSwitch {...theme}/></header>
@@ -197,7 +198,7 @@ function Login({onLogin,theme}:{onLogin:()=>void,theme:ReturnType<typeof useThem
         </Field>
         <Field orientation="horizontal" className="items-start gap-3">
          <Checkbox id="crash-reports" className="mt-0.5" checked={crashReports} onCheckedChange={value=>setCrashReports(value===true)}/>
-         <FieldContent><FieldLabel htmlFor="crash-reports" className="font-normal text-muted-foreground">可选：允许上传匿名崩溃堆栈（不含题库、密码与作答记录）</FieldLabel></FieldContent>
+         <FieldContent><FieldLabel htmlFor="crash-reports" className="font-normal text-muted-foreground">参与软件体验提升计划</FieldLabel></FieldContent>
         </Field>
        </FieldGroup>
       </FieldGroup>

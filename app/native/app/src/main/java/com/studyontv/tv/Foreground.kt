@@ -156,12 +156,18 @@ object Foreground {
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
                 val pkg = event.packageName ?: continue
-                // 系统临时窗口和我们自己都不算前台应用，否则同样会停扣时长 / 误判豁免
-                if (event.eventType != UsageEvents.Event.MOVE_TO_FOREGROUND) continue
                 if (isTransient(pkg) || pkg == context.packageName) continue
-                latest = pkg
-                latestClass = event.className
-                latestAge = (now - event.timeStamp).coerceAtLeast(0)
+                if (event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND ||
+                    (Build.VERSION.SDK_INT >= 29 && event.eventType == UsageEvents.Event.ACTIVITY_RESUMED)) {
+                    latest = pkg
+                    latestClass = event.className
+                    latestAge = (now - event.timeStamp).coerceAtLeast(0)
+                    usageLatestPaused = false
+                } else if ((event.eventType == UsageEvents.Event.MOVE_TO_BACKGROUND ||
+                        (Build.VERSION.SDK_INT >= 29 && event.eventType == UsageEvents.Event.ACTIVITY_PAUSED)) &&
+                    pkg == (latest ?: usageLatest)) {
+                    usageLatestPaused = true
+                }
             }
             usageQueriedAt = now
             if (latest != null) {
@@ -170,7 +176,11 @@ object Foreground {
                 usageLatestAt = (SystemClock.elapsedRealtime() - latestAge).coerceAtLeast(1L)
             }
             val sticky = usageLatest
-            if (sticky != null && !isTransient(sticky) && fresh(usageLatestAt)) return sticky
+            // #173：连续看同一款不计时应用（如网课 / BiliPicks）超过 30 分钟不切应用时不会产生新的前台事件；
+            // 只要该应用尚未收到退后台事件且设备仍在播放音视频，继续认为它在前台，避免 30 分钟后掉回 pkg=null 误判弹题。
+            if (sticky != null && !isTransient(sticky) && (fresh(usageLatestAt) || (!usageLatestPaused && Playback.hasActive(context)))) {
+                return sticky
+            }
             // 没有可用事件（例如刚开机还没有新事件）时，退到最近真的用过的应用；
             // 只接受 STALE_MS 内用过的，避免把早已退出的应用当成当前前台（#93）。
             val recent = try {
@@ -194,6 +204,7 @@ object Foreground {
     @Volatile private var usageLatestClass: String? = null
     /** usageLatest 是什么时候被确认的（elapsedRealtime） */
     @Volatile private var usageLatestAt = 0L
+    @Volatile private var usageLatestPaused = false
 
     fun hasUsageAccess(context: Context): Boolean = try {
         val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager

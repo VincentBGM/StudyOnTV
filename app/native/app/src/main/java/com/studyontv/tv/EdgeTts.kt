@@ -27,9 +27,9 @@ object EdgeTts {
     private const val HOST = "speech.platform.bing.com"
     private const val PORT = 443
     private const val TRUSTED_TOKEN = "6A5AA1D4EAFF4E9FB37E23D68491D6F4"
-    private const val CHROMIUM_VERSION = "130.0.2849.68"
+    private const val CHROMIUM_VERSION = "143.0.3650.75"
     private const val USER_AGENT =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0"
     private const val ORIGIN = "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold"
     private const val OUTPUT_FORMAT = "audio-24khz-48kbitrate-mono-mp3"
     private const val MAX_AUDIO_BYTES = 4 * 1024 * 1024
@@ -69,7 +69,12 @@ object EdgeTts {
             synthesizeOnce(text, chosenVoice, rateStr, System.currentTimeMillis() + clockSkewMs)
         } catch (e: Handshake403Exception) {
             val serverMs = e.serverMillis ?: throw IllegalStateException(e.message ?: "Edge 语音握手被拒绝（HTTP 403）")
-            clockSkewMs = serverMs - System.currentTimeMillis()
+            val delta = serverMs - System.currentTimeMillis()
+            // 仅当设备时钟确实与微软服务端偏差超过 60 秒时才用服务端时间重试，否则快速失败，避免双倍等待（#165）
+            if (kotlin.math.abs(delta - clockSkewMs) < 60_000L) {
+                throw IllegalStateException(e.message ?: "Edge 语音握手被拒绝（HTTP 403）")
+            }
+            clockSkewMs = delta
             synthesizeOnce(text, chosenVoice, rateStr, serverMs)
         }
     }

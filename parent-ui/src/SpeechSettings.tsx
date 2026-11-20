@@ -18,7 +18,7 @@ const modeLabels:Record<string,string>={system:'本地系统语音',edge:'微软
 // 每种通路一句话说清区别和前提，家长不用猜为什么点朗读没声音（#128）
 const modeHints:Record<string,string>={
  system:'不需要网络，但电视可能没装中文语音包；读不出声音时点下面的「检测本地语音」',
- edge:'免费在线朗读（无需 API Key），电视没装系统语音时可直接使用；失败会自动回落系统语音',
+ edge:'免费在线朗读（无需 API Key），失败会自动回落系统语音；该通路依赖微软在线接口，部分网络可能 403，建议同时安装本地中文语音包或配置 DeepSeek 语音',
  auto:'有云端 Key 就用云端；没有 Key 时优先用本地语音，无本地语音则自动用免费 Edge 语音',
  deepseek:'效果最好，需要 DeepSeek Key；电视没有本地语音时选这个',
  azure:'需要 Azure 语音服务的区域和 Key',

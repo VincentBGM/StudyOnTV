@@ -67,13 +67,17 @@ object Prefs {
     fun buglyConsentAsked(c: Context): Boolean = sp(c).getBoolean("bugly_consent_asked", false)
     fun setBuglyConsentAsked(c: Context, v: Boolean) = sp(c).edit().putBoolean("bugly_consent_asked", v).apply()
 
-    // --- 崩溃日志上传（Cloudflare Worker）---
+    // --- 软件体验提升计划（运行与崩溃日志上传，兼容阿里云 OSS 与自建 Worker）---
 
-    /** 用户是否同意上传崩溃日志（同意后替代 Bugly，上传到自建 Worker） */
-    fun crashUploadConsent(c: Context): Boolean = sp(c).getBoolean("crash_upload_consent", false)
+    /** 是否参与软件体验提升计划（默认开启，家长可在登录页或设置页随时关闭） */
+    fun crashUploadConsent(c: Context): Boolean = sp(c).getBoolean("crash_upload_consent", true)
     fun setCrashUploadConsent(c: Context, v: Boolean) = sp(c).edit().putBoolean("crash_upload_consent", v).apply()
     fun crashUploadConsentAsked(c: Context): Boolean = sp(c).getBoolean("crash_upload_consent_asked", false)
     fun setCrashUploadConsentAsked(c: Context, v: Boolean) = sp(c).edit().putBoolean("crash_upload_consent_asked", v).apply()
+
+    /** 上次自动上报运行诊断日志的时间戳（用于按固定间隔节流） */
+    fun lastTelemetryUploadAt(c: Context): Long = sp(c).getLong("last_telemetry_upload_at", 0L)
+    fun setLastTelemetryUploadAt(c: Context, ts: Long) = sp(c).edit().putLong("last_telemetry_upload_at", ts).apply()
 
     /**
      * Cloudflare Worker 接收端 URL。面板里填了就优先用面板的，

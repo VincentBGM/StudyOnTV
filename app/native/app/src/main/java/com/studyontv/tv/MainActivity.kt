@@ -33,7 +33,9 @@ open class MainActivity : Activity() {
         val reason = intent.getStringExtra("reason")
         page = if (this is GateActivity && reason != null && reason !in listOf("timeup", "feedback")) "lock?reason=$reason" else "quiz"
         createWeb()
-        GateService.start(this)
+        GateService.ensureRunning(this, "app")
+        // #166：2GB 电视进程重建时若首次拉起前台服务被系统延迟/拒绝，3 秒后补试一次
+        web.postDelayed({ if (!isFinishing && !isDestroyed && Prefs.onboarded(this)) GateService.ensureRunning(this, "app-retry") }, 3000)
     }
 
     /**

@@ -7,12 +7,21 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.text.InputType
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
+import org.json.JSONObject
 
 class GateOverlay(
     private val context: Context,
@@ -21,7 +30,9 @@ class GateOverlay(
 ) {
     private val handler = Handler(Looper.getMainLooper())
     private val manager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    private var container: FrameLayout? = null
     private var web: WebView? = null
+    private var inlineInputPanel: View? = null
     @Volatile private var attached = false
     private var currentReason = ""
     private val remote = RemoteKeys { Bridge().openParent() }
@@ -134,15 +145,22 @@ class GateOverlay(
             if (Build.VERSION.SDK_INT < 26) created.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
             web = created
         }
+        val host = container ?: FrameLayout(context).also { created ->
+            created.addView(view, FrameLayout.LayoutParams(-1, -1))
+            container = created
+        }
+        if (view.parent == null) host.addView(view, FrameLayout.LayoutParams(-1, -1))
         val needLoad = !reused || reason != currentReason
         currentReason = reason
         val params = WindowManager.LayoutParams(-1, -1, windowType,
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN, PixelFormat.OPAQUE)
         params.gravity = Gravity.TOP or Gravity.START
+        params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         params.title = "StudyOnTV gate"
         return try {
             view.visibility = View.VISIBLE
-            manager.addView(view, params)
+            host.visibility = View.VISIBLE
+            manager.addView(host, params)
             attached = true
             attachAt = SystemClock.elapsedRealtime()
             verifiedVisible = false
@@ -172,14 +190,126 @@ class GateOverlay(
     fun suspend() {
         handler.removeCallbacks(verifyVisibility)
         handler.removeCallbacks(probePageTask)
-        val view = web ?: return
-        if (attached) try { manager.removeViewImmediate(view) } catch (_: Exception) { }
+        dismissInlineInput(notifyCancel = false)
+        val host = container ?: return
+        if (attached) try { manager.removeViewImmediate(host) } catch (_: Exception) { }
         if (attached && !InputSupport.active) MediaPause.release(context)
         if (attached) SpeechReader.stop()
         attached = false
         verifiedVisible = false
         pageReady = false
         attachAt = 0L
+    }
+
+    /**
+     * #172：在悬浮层内部直接弹出原生输入框（不拉起 TvTextInputActivity、不卸载悬浮层），
+     * 避免小米电视 S（Android 14）等系统在切 Activity 时触发后台/合规清理导致进程被杀、填空答案丢失。
+     */
+    private fun showInlineInput(draft: String, prompt: String, passwordMode: Boolean) {
+        val host = container ?: return
+        val targetWeb = web ?: return
+        if (!attached) return
+        dismissInlineInput(notifyCancel = false)
+        val dp = context.resources.displayMetrics.density
+        val panel = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setBackgroundColor(TvUi.background(context))
+            setPadding((64 * dp).toInt(), (36 * dp).toInt(), (64 * dp).toInt(), (24 * dp).toInt())
+            isClickable = true
+            isFocusable = true
+        }
+        panel.addView(TextView(context).apply {
+            text = if (passwordMode) "家长验证" else "填写答案"
+            textSize = 26f
+            setTextColor(TvUi.foreground(context))
+        })
+        if (prompt.isNotBlank()) {
+            panel.addView(TextView(context).apply {
+                text = prompt.take(200)
+                textSize = 16f
+                setTextColor(TvUi.muted(context))
+                maxLines = 3
+                setPadding(0, (8 * dp).toInt(), 0, (12 * dp).toInt())
+            }, LinearLayout.LayoutParams(-1, -2))
+        }
+        lateinit var edit: EditText
+        fun commit(accepted: Boolean) {
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            imm?.hideSoftInputFromWindow(edit.windowToken, 0)
+            val text = edit.text?.toString().orEmpty()
+            dismissInlineInput(notifyCancel = false)
+            if (accepted) {
+                val payload = JSONObject().put("text", text).toString()
+                targetWeb.post {
+                    try { targetWeb.evaluateJavascript("window.SOTV_INPUT&&SOTV_INPUT($payload)", null) } catch (_: Throwable) { }
+                    targetWeb.requestFocus()
+                }
+            } else {
+                targetWeb.post {
+                    try { targetWeb.evaluateJavascript("window.SOTV_INPUT_CANCEL&&SOTV_INPUT_CANCEL()", null) } catch (_: Throwable) { }
+                    targetWeb.requestFocus()
+                }
+            }
+        }
+        edit = EditText(context).apply {
+            hint = if (passwordMode) "输入家长管理密码" else "用遥控器或输入法填写答案，完成后选“确定”"
+            inputType = if (passwordMode) InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                else InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            imeOptions = EditorInfo.IME_ACTION_DONE or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            minLines = if (passwordMode) 1 else 2
+            maxLines = if (passwordMode) 1 else 5
+            gravity = Gravity.TOP or Gravity.START
+            TvUi.field(this)
+            setText(draft)
+            setSelection(text.length)
+            setOnEditorActionListener { _, action, _ ->
+                if (action == EditorInfo.IME_ACTION_DONE) { commit(true); true } else false
+            }
+            setOnKeyListener { _, keyCode, event ->
+                if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+                    commit(false); true
+                } else false
+            }
+        }
+        panel.addView(edit, LinearLayout.LayoutParams(-1, -2).apply { topMargin = (8 * dp).toInt() })
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        fun addBtn(label: String, primary: Boolean = false, action: () -> Unit) {
+            val btn = TvUi.button(context, label, primary, action)
+            btn.setOnKeyListener { _, keyCode, event ->
+                if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+                    commit(false); true
+                } else false
+            }
+            row.addView(btn, LinearLayout.LayoutParams(-2, -2).apply {
+                leftMargin = (8 * dp).toInt(); rightMargin = (8 * dp).toInt()
+            })
+        }
+        addBtn(if (passwordMode) "验证解锁" else "确定", true) { commit(true) }
+        addBtn("清空") { edit.setText("") }
+        addBtn("取消") { commit(false) }
+        panel.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = (20 * dp).toInt() })
+        host.addView(panel, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        inlineInputPanel = panel
+        edit.requestFocus()
+        edit.post {
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            imm?.showSoftInput(edit, InputMethodManager.SHOW_IMPLICIT)
+        }
+    }
+
+    private fun dismissInlineInput(notifyCancel: Boolean) {
+        val panel = inlineInputPanel ?: return
+        inlineInputPanel = null
+        (panel.parent as? ViewGroup)?.removeView(panel)
+        if (notifyCancel) {
+            web?.post {
+                try { web?.evaluateJavascript("window.SOTV_INPUT_CANCEL&&SOTV_INPUT_CANCEL()", null) } catch (_: Throwable) { }
+            }
+        }
     }
 
     private val release = Runnable { destroy() }
@@ -204,6 +334,8 @@ class GateOverlay(
         val view = web ?: return
         suspend()
         MediaPause.release(context)
+        (view.parent as? ViewGroup)?.removeView(view)
+        container = null
         web = null
         currentReason = ""
         verifiedVisible = false
@@ -225,8 +357,12 @@ class GateOverlay(
         }
         @JavascriptInterface fun answerText(draft: String, prompt: String) {
             handler.post {
-                web?.let { InputSupport.openText(context, it, draft, prompt) }
-                if (InputSupport.active) suspend()
+                if (DeviceBridge.isTv(context) && attached) {
+                    showInlineInput(draft, prompt, passwordMode = false)
+                } else {
+                    web?.let { InputSupport.openText(context, it, draft, prompt) }
+                    if (InputSupport.active) suspend()
+                }
             }
         }
         @JavascriptInterface fun resumePrevious() {
@@ -280,8 +416,13 @@ class GateOverlay(
             handler.post {
                 val allowed = try { DeviceRuntime.store.config().optBoolean("allowQuizUnlock", false) } catch (_: Throwable) { false }
                 if (!allowed) return@post
-                web?.let { InputSupport.openPassword(context, it, "输入家长密码，验证后可临时解锁 ${DeviceBridge.QUIZ_UNLOCK_MINUTES} 分钟") }
-                if (InputSupport.active) suspend()
+                val prompt = "输入家长密码，验证后可临时解锁 ${DeviceBridge.QUIZ_UNLOCK_MINUTES} 分钟"
+                if (DeviceBridge.isTv(context) && attached) {
+                    showInlineInput("", prompt, passwordMode = true)
+                } else {
+                    web?.let { InputSupport.openPassword(context, it, prompt) }
+                    if (InputSupport.active) suspend()
+                }
             }
         }
         @JavascriptInterface fun quizUnlock(value: String): String {
@@ -299,6 +440,26 @@ class GateOverlay(
                 Diag.warn("Auth", "overlay quiz unlock failed: ${e.message}")
                 org.json.JSONObject().put("ok", false).put("error", "failed").toString()
             }
+        }
+        @JavascriptInterface fun askSettingsPassword() {
+            handler.post {
+                val prompt = "输入管理密码，验证后可临时进入系统设置 2 分钟"
+                if (DeviceBridge.isTv(context) && attached) {
+                    showInlineInput("", prompt, passwordMode = true)
+                } else {
+                    web?.let { InputSupport.openPassword(context, it, prompt) }
+                    if (InputSupport.active) suspend()
+                }
+            }
+        }
+        @JavascriptInterface fun settingsUnlock(value: String): String {
+            if (!AdminAuth.verify(context, value)) return org.json.JSONObject().put("ok", false).put("error", "wrong").toString()
+            SystemSettingsGuard.grant()
+            Diag.info("Auth", "家长在悬浮拦截层验证密码，临时放行系统设置 2 分钟")
+            handler.post { hide() }
+            GateService.hideGates()
+            GateService.refreshNow()
+            return org.json.JSONObject().put("ok", true).toString()
         }
         @JavascriptInterface fun navigationBlocked(): Boolean {
             LearningNavigation.notifyBlocked(context)

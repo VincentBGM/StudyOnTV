@@ -37,8 +37,10 @@ class GateService : Service() {
     /** 上一轮 tick 的状态：mediaTick / diagnostics 用它做「静音是否同源」的纯函数判定 */
     @Volatile private var freeNow = false
     @Volatile private var gateExpectedNow = false
+    @Volatile private var settingsBlockedNow = false
     private var lastDiag = ""
     private var lastAccessibilityCheckAt = -1L
+    private var lastTelemetryCheckAt = 0L
     private var countdownActiveAt = -1L
     private var countdownPackage: String? = null
     private var lastAwake: Boolean? = null
@@ -86,6 +88,7 @@ class GateService : Service() {
             wasUsing = false
             freeNow = true
             gateExpectedNow = false
+            settingsBlockedNow = false
             beatWatch(false)
             updateAnchor(false)
             hideAll()
@@ -102,8 +105,7 @@ class GateService : Service() {
         if (!canOverlay) overlay.hide()
         val status = DeviceRuntime.learning.status()
         val free = status.optBoolean("free")
-        freeNow = free
-        if (free) MediaPause.releaseAll(this)
+        val unlimited = status.optJSONObject("override")?.optString("mode") == "indefinite"
         if (InputSupport.active) {
             wasUsing = false
             beatWatch(false)
@@ -111,7 +113,7 @@ class GateService : Service() {
             countdown.hide()
             return
         }
-        if (SystemSettingsGuard.active(now)) { wasUsing = false; beatWatch(false); hideAll(); countdown.hide(); if (MediaPause.active) releaseMuteWithoutGate("settings"); return }
+        if (SystemSettingsGuard.active(now)) { settingsBlockedNow = false; freeNow = free; wasUsing = false; beatWatch(false); hideAll(); countdown.hide(); if (MediaPause.active) releaseMuteWithoutGate("settings"); return }
         val power = getSystemService(POWER_SERVICE) as PowerManager
         val locked = (getSystemService(KEYGUARD_SERVICE) as KeyguardManager).isKeyguardLocked
         val awake = power.isInteractive && !locked && screenOn && displayOn()
@@ -143,30 +145,47 @@ class GateService : Service() {
             else -> launcherPlaying(pkg) || (pkg != packageName && (pkg == launcherPackage() || Foreground.isTransient(pkg)) &&
                 DeviceRuntime.store.config().optBoolean("trafficAssistEnabled") && PlaybackTraffic.playing(this))
         }
+        val settingsBlocked = SystemSettingsGuard.blocked(
+            context = this,
+            awake = awake,
+            monitoring = monitoring,
+            unlimited = unlimited,
+            pkg = pkg,
+            blockSettings = config.optBoolean("blockSettingsDuringControl", true),
+            recentlyVerified = AdminAuth.recentlyVerified(),
+            now = now
+        )
+        settingsBlockedNow = settingsBlocked
+        val effectiveFree = free && !settingsBlocked
+        freeNow = effectiveFree
+        if (effectiveFree && MediaPause.active) MediaPause.releaseAll(this)
         // 手机 / 平板的桌面本身不是内容页：到点后仍然允许孩子回到桌面挑应用，
         // 否则桌面先被拦住，「不计时白名单」里的应用根本点不进去（用户反馈）。
-        // 打开白名单以外的应用时照常拦截。电视的桌面包常常就是影视入口（聚好看 / JUUI），
-        // 那里继续沿用原来的口径：桌面在放视频时照样弹题。
-        val mobileHome = pkg != null && !DeviceBridge.isTv(this) && exempt(pkg) && !launcherPlaying(pkg)
-        val protecting = awake && monitoring && !ownForeground && !whitelistedNow && !mobileHome && (pkg == null || !exempt(pkg, false))
+        // 注意：只能匹配真正的桌面包名，绝不能用 exempt(pkg) 把系统设置 / 应用管理也当成桌面而每秒 hideAll()。
+        val mobileHome = !settingsBlocked && pkg != null && !DeviceBridge.isTv(this) &&
+            (pkg == launcherPackage() || Foreground.isLauncher(pkg)) && !launcherPlaying(pkg)
+        val exemptNonSettings = !settingsBlocked && pkg != null && exempt(pkg, false)
+        val protecting = awake && monitoring && !ownForeground && !whitelistedNow && !mobileHome && !exemptNonSettings
         val reason = status.getString("reason")
-        val settingsBlocked = SystemSettingsGuard.blocked(this, awake, monitoring, free, pkg,
-            DeviceRuntime.store.config().optBoolean("blockSettingsDuringControl", true), AdminAuth.recentlyVerified())
         val gateReason = if (settingsBlocked) "settings" else reason
         val pendingFeedback = DeviceRuntime.store.get("review_feedback").isNotEmpty()
-        val practice = DeviceRuntime.store.config().optString("playMode") == "practice"
+        val practice = config.optString("playMode") == "practice"
         // 一次 tick 内统一口径：什么情况下应该有 Gate（静音与弹窗共用这个判断）
-        gateExpectedNow = !free && !whitelistedNow && !mobileHome && (gateReason.isNotEmpty() || pendingFeedback || practice)
+        gateExpectedNow = settingsBlocked || (!free && !whitelistedNow && !mobileHome && !exemptNonSettings && (gateReason.isNotEmpty() || pendingFeedback || practice))
         val feedbackVisible = !free && hasGate() && pendingFeedback
-        AudioController.syncLearningActivity(free, gateExpectedNow)
+        AudioController.syncLearningActivity(effectiveFree, gateExpectedNow)
         wasUsing = active && !free && reason.isEmpty() && !feedbackVisible
         beatWatch(wasUsing)
-        if (!awake || !monitoring || mobileHome || (!settingsBlocked && (ownForeground || (reason.isEmpty() && !feedbackVisible) || (pkg != null && exempt(pkg, false))))) hideAll()
+        if (!awake || !monitoring || mobileHome || (!settingsBlocked && (ownForeground || (reason.isEmpty() && !feedbackVisible) || exemptNonSettings))) hideAll()
         // #162：无障碍按键过滤只在学习页真的要拦 Home / 任务键时打开，平时关掉，
         // 否则海信 VIDAA 这类固件的系统音量条会从厂商面板退回 AOSP 白卡片。
         try { WatchAccessibilityService.setHomeFilter(LearningNavigation.shouldBlockHome()) } catch (_: Exception) { }
         val snapshot = "reason=$gateReason free=$free awake=$awake screen=$screenOn monitoring=$monitoring own=$ownForeground pkg=$pkg cls=${pkg?.let { Foreground.currentClass(it) }} active=$active gate=${hasGate()} overlay=$canOverlay mute=${MediaPause.active} failures=$gateFailures"
         if (snapshot != lastDiag) { lastDiag = snapshot; Diag.info("Gate", snapshot) }
+        if (now - lastTelemetryCheckAt >= 1_800_000L) {
+            lastTelemetryCheckAt = now
+            Diag.uploadRuntimeLogsIfDue(this)
+        }
         val state = GateTickState(now, free, awake, screenOn, monitoring, canOverlay, ownForeground, pkg,
             gateExpectedNow, gateReason, settingsBlocked, active, protecting)
         ensureGateVisible(state)
@@ -602,15 +621,8 @@ class GateService : Service() {
         return pkg == launcher || Foreground.isLauncher(pkg)
     }
 
-    override fun onCreate() {
-        super.onCreate()
-        DeviceRuntime.ensure(this)
-        UninstallGuard.restoreOwnerPolicy(this)
-        overlay = GateOverlay(this, GateOverlay.applicationWindowType())
-        instance = this
-        // 服务重建 = 新的一轮，静音/弹窗不同源的计时从零开始
-        AudioController.reset()
-        Prefs.setServiceRunning(this, true)
+    /** 尽早进入前台服务：Android 8+ 要求 startForegroundService 后 5 秒内必须调用 startForeground，绝不能放在数据库初始化后面（#166） */
+    private fun enterForeground() {
         val channelId = "sotv_gate"
         val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(NotificationChannel(channelId, "使用时间管理", NotificationManager.IMPORTANCE_LOW))
@@ -618,8 +630,25 @@ class GateService : Service() {
         val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, channelId) else Notification.Builder(this)
         val notification = builder.setContentTitle("题了个题 · 使用时间管理中").setContentText("点击打开学习任务")
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm).setContentIntent(pi).setOngoing(true).build()
-        if (Build.VERSION.SDK_INT >= 34) startForeground(1001, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        else startForeground(1001, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= 34) startForeground(1001, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            else startForeground(1001, notification)
+        } catch (e: Exception) {
+            Diag.warn("Service", "startForeground failed: ${e.javaClass.simpleName} ${e.message ?: ""}")
+        }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        // #166：2GB 内存电视被强杀后重启时 IO 慢，先抢在任何数据库/磁盘操作前调用 startForeground，避免 5 秒超时崩掉
+        enterForeground()
+        DeviceRuntime.ensure(this)
+        UninstallGuard.restoreOwnerPolicy(this)
+        overlay = GateOverlay(this, GateOverlay.applicationWindowType())
+        instance = this
+        // 服务重建 = 新的一轮，静音/弹窗不同源的计时从零开始
+        AudioController.reset()
+        Prefs.setServiceRunning(this, true)
         // 屏幕亮灭广播：用于识别 TCL「关机未断电」这类 PowerManager 仍报 interactive 的情况
         try {
             registerReceiver(screenReceiver, IntentFilter().apply {
@@ -640,7 +669,10 @@ class GateService : Service() {
         handler.postDelayed(mediaTick, 1000)
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        enterForeground()
+        return START_STICKY
+    }
     override fun onBind(intent: Intent?): IBinder? = null
 
     /** 手机上从“最近任务”划掉应用时，部分系统会连带停止服务；2 秒后自动拉起 */
@@ -713,7 +745,7 @@ class GateService : Service() {
             val overlayPresenting = overlay?.presenting(now) == true
             val learningActivity = Foreground.learningActivity() != null
             val gateExpected = service?.gateExpectedNow == true
-            val free = freeState()
+            val free = freeState() && service?.settingsBlockedNow != true
             val mute = MediaPause.active
             val gateVisible = GatePresentation.gateVisible(accessibilityGate, overlayPresenting, learningActivity, gateExpected)
             val mismatch = GatePresentation.inconsistentMute(mute, gateVisible, InputSupport.active, free)
@@ -809,8 +841,11 @@ class GateService : Service() {
             if (parentAuthorized) AdminAuth.markVerified()
             instance?.let { service ->
                 val canIdentify = WatchAccessibilityService.connected || Foreground.hasUsageAccess(service)
-                val settingsLocked = !DeviceRuntime.learning.status().optBoolean("free") &&
-                    DeviceRuntime.store.config().optBoolean("blockSettingsDuringControl", true)
+                val status = DeviceRuntime.learning.status()
+                val unlimited = status.optJSONObject("override")?.optString("mode") == "indefinite"
+                val config = DeviceRuntime.store.config()
+                val settingsLocked = config.optBoolean("supervisionEnabled", true) && !unlimited &&
+                    config.optBoolean("blockSettingsDuringControl", true)
                 // Installation is allowed; it must not grant a child access to every Settings page.
                 if (!parentAuthorized && !AdminAuth.recentlyVerified() && canIdentify && settingsLocked) return
                 SystemSettingsGuard.grant()
