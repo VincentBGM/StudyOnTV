@@ -2,20 +2,20 @@
   "version": "0.5.2",
   "versionCode": 49,
   "force": false,
-  "notes": "release: v0.5.2 — 修复 DeepSeek 流式 WAV/Edge v2/自动更新/白名单续命/共用 Key 与中文报错 (#174 #179 #183)",
-  "publishedAt": "2026-11-22T04:12:55.154Z",
+  "notes": "feat(release): 新增 EU 仅本地隐私版（Local-Only）构建并在 Release 中附带安装包说明 (#175)",
+  "publishedAt": "2026-11-22T04:31:38.261Z",
   "assets": {
     "tv": {
       "name": "StudyOnTV-Android-TV-v0.5.2.apk",
       "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.5.2/StudyOnTV-Android-TV-v0.5.2.apk",
-      "sha256": "1c7c362b928ae04303920a117f44ed375873e215f170d141f93fd8f940d97103",
-      "size": 3460389
+      "sha256": "ea3617397b38f4f75ce9105db26bb10da271c820e6a38233a4fee16d77d4130a",
+      "size": 3462240
     },
     "mobile": {
       "name": "StudyOnTV-Mobile-v0.5.2.apk",
       "url": "https://github.com/chadyi/StudyOnTV/releases/download/v0.5.2/StudyOnTV-Mobile-v0.5.2.apk",
-      "sha256": "f9c3f81322ec7f423b052c9ae39c9fb826a0efa574b4d39275a9cf23ab9e265f",
-      "size": 3462540
+      "sha256": "30d5b5c2c9e8e3ec31511128cd81c108f02eba9afc774bd9b323d01a11d6dbff",
+      "size": 3464629
     }
   }
 }
