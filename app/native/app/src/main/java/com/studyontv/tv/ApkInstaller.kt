@@ -53,6 +53,10 @@ object ApkInstaller {
 
     /** 依次尝试直连和各个加速镜像，任一线路成功即返回；若蒲公英签名链接过期返回 HTML，自动刷新一次下载地址重试 */
     fun download(ctx: Context, url: String, sha256: String, onSource: (String) -> Unit, onProgress: (Int) -> Unit): File? {
+        if (LocalOnlyGuard.enabled) {
+            lastError = "仅本地隐私版（EU Local-Only）已禁用应用内下载与安装"
+            return null
+        }
         lastError = ""
         for ((name, candidate) in Updater.downloadCandidates(ctx, url)) {
             onSource(name)

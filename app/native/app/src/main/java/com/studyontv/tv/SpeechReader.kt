@@ -182,6 +182,7 @@ object SpeechReader {
             val config = try { JSONObject(DeviceRuntime.store.get("speech_settings", "{}")) } catch (_: Throwable) { JSONObject() }
             val mode = config.optString("mode", "auto")
             val chosen = when {
+                LocalOnlyGuard.enabled -> "system"
                 mode == "auto" -> when {
                     deepseekKey(config).isNotEmpty() -> "deepseek"
                     config.optString("azureKey").isNotEmpty() -> "azure"
@@ -216,6 +217,10 @@ object SpeechReader {
         // 地址本身不合法：不排队到主线程，直接同步回报（回归测试可断言 status()）
         if (!(url.startsWith("https://") || url.startsWith("http://"))) {
             recordFailure("audio", "unsupported-url", "", "", false, "音频地址不正确，无法播放", notice)
+            return
+        }
+        if (LocalOnlyGuard.enabled && !LocalOnlyGuard.isLocalUrl(url)) {
+            recordFailure("audio", "local-only-blocked", "", "", false, "仅本地隐私版仅允许播放本机或局域网内的音频", notice)
             return
         }
         main.post {
@@ -597,6 +602,7 @@ object SpeechReader {
      * 会阻塞，调用方放到后台线程。
      */
     fun transcribe(key: String, wav: ByteArray): String {
+        if (LocalOnlyGuard.enabled) throw IllegalStateException("仅本地隐私版（EU Local-Only）已禁用云端语音识别")
         require(key.isNotEmpty()) { "还没填 DeepSeek API Key" }
         require(wav.size > 44) { "没有录到声音" }
         require(wav.size <= 8 * 1024 * 1024) { "录音太长，请分段说" }

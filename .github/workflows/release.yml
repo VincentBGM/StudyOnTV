@@ -117,16 +117,16 @@ jobs:
         working-directory: app/native
         run: gradle testTvDebugUnitTest testMobileDebugUnitTest --no-daemon
 
-      - name: 构建 TV Release APK
+      - name: 构建 TV Release APK（标准版）
         working-directory: app/native
         run: gradle assembleTvRelease --no-daemon
 
-      - name: 构建 Mobile Release APK
+      - name: 构建 Mobile Release APK（标准版）
         working-directory: app/native
         run: gradle assembleMobileRelease --no-daemon
 
-      # ── 4. 整理产物，重命名为发布文件名 ─────────────────────────────
-      - name: 整理产物
+      # ── 4. 整理标准版产物 ────────────────────────────────────────────
+      - name: 整理标准版产物
         run: |
           TAG=${GITHUB_REF#refs/tags/}
           mkdir -p release-artifacts
@@ -136,19 +136,48 @@ jobs:
              release-artifacts/StudyOnTV-Mobile-${TAG}.apk
           echo "TAG=${TAG}" >> $GITHUB_ENV
 
-      # ── 5. 生成 update.json ──────────────────────────────────────────
-      - name: 生成 update.json
+      # ── 4b. 构建 EU 仅本地隐私版（Local-Only，Issue #175）──────────────
+      - name: 构建 EU 仅本地隐私版 APK（TV + Mobile）
+        working-directory: app/native
+        run: gradle assembleTvRelease assembleMobileRelease -PlocalOnly=true --no-daemon
+
+      - name: 整理 EU 仅本地隐私版产物
+        run: |
+          cp app/native/app/build/outputs/apk/tv/release/app-tv-release.apk \
+             release-artifacts/StudyOnTV-Android-TV-EU-LocalOnly-${TAG}.apk
+          cp app/native/app/build/outputs/apk/mobile/release/app-mobile-release.apk \
+             release-artifacts/StudyOnTV-Mobile-EU-LocalOnly-${TAG}.apk
+
+      # ── 5. 生成 update.json 与 GitHub Release 说明 ───────────────────
+      - name: 生成 update.json 与 Release 正文
         run: |
           # 从附注标签的完整说明作为更新说明（git tag -a v0.x.x -F 说明.txt）
           # 用 %(contents) 取全文：标签说明没写空行时 %(contents:body) 是空的
           NOTES=$(git tag -l --format='%(contents)' "$TAG" 2>/dev/null || echo "")
           node scripts/make-update-manifest.mjs release-artifacts --notes "$NOTES"
+          cat > release-notes.md <<EOF
+          ${NOTES}
+
+          ---
+
+          ### 安装包选择说明 / Which APK to Download
+
+          | 安装包 / APK | 适用设备 / Device | 用途与区别 / Purpose & Differences |
+          |---|---|---|
+          | \`StudyOnTV-Android-TV-${TAG}.apk\` | 智能电视 / 电视盒子 / 投影仪（Android TV） | **标准电视版（推荐）**：遥控器方向键适配，支持在线更新、云端 AI 出题/批改与在线语音朗读、在线题库市场与节假日同步。 |
+          | \`StudyOnTV-Mobile-${TAG}.apk\` | 安卓手机 / 平板（Android Phone & Tablet） | **标准手机/平板版（推荐）**：触屏适配，支持独立做题与管控、在线更新、云端 AI 出题/批改与在线语音朗读。 |
+          | \`StudyOnTV-Android-TV-EU-LocalOnly-${TAG}.apk\` | 智能电视 / 电视盒子（Android TV · EU / 隐私增强版） | **仅本地隐私电视版（EU / GDPR Local-Only）**：彻底关闭一切公网连接（无在线更新、无应用内安装、无在线题库/节假日联网、无云端 AI/语音）；AI 仅允许连接家庭局域网本地服务（如 Ollama），朗读仅使用本机系统语音，WebView 拦截所有公网请求，完整保留同 Wi-Fi 扫码管理。 |
+          | \`StudyOnTV-Mobile-EU-LocalOnly-${TAG}.apk\` | 安卓手机 / 平板（Android Phone & Tablet · EU / 隐私增强版） | **仅本地隐私手机/平板版（EU / GDPR Local-Only）**：与 EU 电视版相同的纯本地零外联策略，适合注重数据不出局域网的欧洲及隐私敏感家庭。 |
+
+          > **覆盖升级提示 / Upgrade Note**：同形态（TV 覆盖 TV、Mobile 覆盖 Mobile）直接覆盖安装即可，**切勿先卸载旧版**，题库、记录与所有配置会自动保留。
+          EOF
 
       # ── 6. 发布到 GitHub Release（先上传资产，避免 update.json 指向 404）──
       - name: 发布到 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: release-artifacts/*.apk
+          body_path: release-notes.md
           fail_on_unmatched_files: true
 
       # ── 7. commit update.json 回 main ────────────────────────────────

@@ -133,6 +133,7 @@ object GradingService {
         val host = hostOf(url)
         val method = if (body == null) "GET" else "POST"
         fun elapsed() = System.currentTimeMillis() - started
+        LocalOnlyGuard.requireLocalUrl(url, "AI 服务（如局域网 Ollama）")
         val connection = URL(url).openConnection() as HttpURLConnection
         var responded = false
         try {
