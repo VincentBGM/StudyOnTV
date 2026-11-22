@@ -151,8 +151,8 @@ jobs:
       # ── 5. 生成 update.json 与 GitHub Release 说明 ───────────────────
       - name: 生成 update.json 与 Release 正文
         run: |
-          # 从附注标签的完整说明作为更新说明（git tag -a v0.x.x -F 说明.txt）
-          # 用 %(contents) 取全文：标签说明没写空行时 %(contents:body) 是空的
+          # actions/checkout@v4 在 tag 触发时会先建轻量标签，必须 --force 拉取附注标签对象才能读到完整发版说明
+          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}"
           NOTES=$(git tag -l --format='%(contents)' "$TAG" 2>/dev/null || echo "")
           node scripts/make-update-manifest.mjs release-artifacts --notes "$NOTES"
           cat > release-notes.md <<EOF
