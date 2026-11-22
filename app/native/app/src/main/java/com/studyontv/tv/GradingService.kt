@@ -163,12 +163,7 @@ object GradingService {
             if (code !in 200..299) {
                 val detail = try { JSONObject(text).let { it.optJSONObject("error")?.optString("message") ?: it.optString("message") ?: it.optString("error") } } catch (_: Exception) { text.take(160) }
                 Diag.warn("AI", "$method $host http=$code elapsed=${elapsed()}ms timeout=${timeout}ms detail=${detail.orEmpty().take(120)}")
-                throw ApiError(when (code) {
-                    401, 403 -> "API Key 无效或没有权限（HTTP $code）"
-                    404 -> "地址或模型不存在（HTTP 404），请检查接口地址是否以 /v1 等版本号结尾"
-                    429 -> "请求太频繁或余额不足（HTTP 429）"
-                    else -> "服务返回 HTTP $code"
-                } + if (!detail.isNullOrBlank()) "：" + detail.take(160) else "")
+                throw ApiError(localizeApiError(code, detail))
             }
             Diag.info("AI", "$method $host http=$code elapsed=${elapsed()}ms bytes=${bytes.size}")
             return try { JSONObject(text) } catch (_: Exception) {
@@ -197,6 +192,26 @@ object GradingService {
             Diag.warn("AI", "$method $host failed=${e.javaClass.simpleName} elapsed=${elapsed()}ms detail=${e.message.orEmpty().take(160)}")
             throw e
         } finally { connection.disconnect() }
+    }
+
+    internal fun localizeApiError(code: Int, rawDetail: String?): String {
+        val detail = rawDetail.orEmpty().trim()
+        val lower = detail.lowercase(java.util.Locale.US)
+        return when {
+            code == 402 || lower.contains("insufficient balance") || lower.contains("insufficient_quota") || lower.contains("exceeded your current quota") ->
+                "账户余额不足，请先到服务商平台充值后再试"
+            code == 401 || code == 403 || lower.contains("invalid_api_key") || lower.contains("incorrect api key") || lower.contains("authentication fails") ->
+                "API Key 无效或没有权限，请检查密钥是否填写正确"
+            code == 404 || lower.contains("model_not_found") || lower.contains("does not exist") ->
+                "接口地址或模型名称不存在（HTTP $code），请检查接口地址（如 /v1）与模型名称"
+            code == 429 || lower.contains("rate limit") || lower.contains("too many requests") ->
+                "请求过于频繁或触发限流，请稍后再试"
+            lower.contains("context length") || lower.contains("maximum context") || (lower.contains("token") && lower.contains("limit")) ->
+                "输入内容过长，超出模型单次处理上限，请精简后再试"
+            code in listOf(500, 502, 503, 504) || lower.contains("overloaded") || lower.contains("service unavailable") ->
+                "AI 服务暂时繁忙（HTTP $code），请稍后再试"
+            else -> "服务返回错误（HTTP $code）" + if (detail.isNotEmpty()) "：${detail.take(120)}" else ""
+        }
     }
 
     private fun chat(config: JSONObject, messages: JSONArray, maxTokens: Int, timeout: Int = 30000): String {
